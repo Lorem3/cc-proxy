@@ -452,7 +452,7 @@ impl Router {
         // Stream the response body directly without buffering
         let stream = response
             .bytes_stream()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+            .map_err(std::io::Error::other);
 
         let body = if has_gzip_encoding {
             // Decompress gzipped response
@@ -460,7 +460,7 @@ impl Router {
             let reader = StreamReader::new(stream);
             let decoder = GzipDecoder::new(reader);
             let decompressed_stream = tokio_util::io::ReaderStream::new(decoder)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+                .map_err(std::io::Error::other);
             Body::from_stream(decompressed_stream)
         } else {
             // Pass through uncompressed

@@ -450,18 +450,17 @@ impl Router {
         }
 
         // Stream the response body directly without buffering
-        let stream = response.bytes_stream().map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, e)
-        });
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
 
         let body = if has_gzip_encoding {
             // Decompress gzipped response
             tracing::debug!("Decompressing gzipped response");
             let reader = StreamReader::new(stream);
             let decoder = GzipDecoder::new(reader);
-            let decompressed_stream = tokio_util::io::ReaderStream::new(decoder).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, e)
-            });
+            let decompressed_stream = tokio_util::io::ReaderStream::new(decoder)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
             Body::from_stream(decompressed_stream)
         } else {
             // Pass through uncompressed
@@ -471,7 +470,10 @@ impl Router {
                     let preview = &chunk[..chunk.len().min(50)];
                     match std::str::from_utf8(preview) {
                         Ok(s) => tracing::debug!("Response chunk (UTF-8): {:?}...", s),
-                        Err(_) => tracing::debug!("Response chunk (bytes): {:02x?}...", &preview[..preview.len().min(20)]),
+                        Err(_) => tracing::debug!(
+                            "Response chunk (bytes): {:02x?}...",
+                            &preview[..preview.len().min(20)]
+                        ),
                     }
                 }
             }))

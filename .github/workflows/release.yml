@@ -49,8 +49,6 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-13
 
     steps:
       - uses: actions/checkout@v4

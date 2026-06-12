@@ -19,6 +19,34 @@ Language | 语言: [English](#english) · [中文](#中文)
 
 ## 🛠️ Installation
 
+### Pre-built Binaries (Recommended)
+
+Download the latest release for your platform from the [Releases](https://github.com/Lorem3/cc-proxy/releases) page.
+
+```bash
+# Linux x86_64
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cc-proxy-x86_64-unknown-linux-gnu.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# Linux arm64
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-unknown-linux-gnu.tar.gz
+tar xzf cc-proxy-aarch64-unknown-linux-gnu.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# macOS arm64 (Apple Silicon)
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-apple-darwin.tar.gz
+tar xzf cc-proxy-aarch64-apple-darwin.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# macOS x86_64 (Intel)
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-apple-darwin.tar.gz
+tar xzf cc-proxy-x86_64-apple-darwin.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+```
+
+Windows users can download `cc-proxy-x86_64-pc-windows-msvc.zip` from the Releases page and place `cc-proxy.exe` in a directory on your `PATH`.
+
 ### Prerequisites
 
   * **Rust**: Ensure you have `cargo` installed.
@@ -36,6 +64,17 @@ cargo build --release
 # Install globally
 sudo cp target/release/cc-proxy /usr/local/bin/
 ```
+
+### Publishing a New Release
+
+Update the `version` field in `Cargo.toml`, commit, then push a matching tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions will automatically build binaries for all five platforms and publish a GitHub Release.
 
 -----
 
@@ -140,6 +179,34 @@ You can define separate provider lists for **Codex** and **Claude**. The proxy t
 
 ### 🛠️ 安装
 
+#### 预编译二进制（推荐）
+
+从 [Releases](https://github.com/Lorem3/cc-proxy/releases) 页面下载适合你平台的最新版本。
+
+```bash
+# Linux x86_64
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cc-proxy-x86_64-unknown-linux-gnu.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# Linux arm64
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-unknown-linux-gnu.tar.gz
+tar xzf cc-proxy-aarch64-unknown-linux-gnu.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# macOS arm64（Apple Silicon）
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-apple-darwin.tar.gz
+tar xzf cc-proxy-aarch64-apple-darwin.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+
+# macOS x86_64（Intel）
+curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-apple-darwin.tar.gz
+tar xzf cc-proxy-x86_64-apple-darwin.tar.gz
+sudo mv cc-proxy /usr/local/bin/
+```
+
+Windows 用户可从 Releases 页面下载 `cc-proxy-x86_64-pc-windows-msvc.zip`，解压后将 `cc-proxy.exe` 放入 `PATH` 目录即可。
+
 #### 先决条件
 
   * **Rust**：需要已安装 `cargo`。
@@ -157,6 +224,17 @@ cargo build --release
 # 全局安装
 sudo cp target/release/cc-proxy /usr/local/bin/
 ```
+
+#### 发布新版本
+
+更新 `Cargo.toml` 中的 `version` 字段并提交，然后推送对应的 tag：
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions 将自动为全部五个平台构建二进制并发布 GitHub Release。
 
 -----
 

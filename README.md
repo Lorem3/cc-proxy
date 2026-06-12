@@ -142,6 +142,45 @@ requires_openai_auth = false
 
 Create your configuration file at `~/.cc-proxy/provider.json`.
 
+#### Model Mapping (per-model routing)
+
+Use `model_mapping` to route individual models to different providers. When the request's `model` field contains a key (case-insensitive substring match), the proxy forwards to that entry's `apiUrl` and injects its `apiKey`. Longer, more specific keys take priority.
+
+```json
+{
+  "model_mapping": {
+    "opus":          { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-opus-key" },
+    "sonnet":        { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-sonnet-key" },
+    "deepseek-v3":   { "apiUrl": "https://api.deepseek.com/v1",     "apiKey": "sk-ds-key" },
+    "mimo-v2.5-pro": { "apiUrl": "https://api.mimo.ai/v1",          "apiKey": "sk-mimo-key" },
+    "gpt-4o":        { "apiUrl": "https://api.openai.com/v1",       "apiKey": "sk-oai-key" }
+  }
+}
+```
+
+**Matching rules:**
+
+- Match is case-insensitive substring: `"sonnet"` matches `claude-sonnet-4-5`, `claude-sonnet-3-7`, etc.
+- More specific (longer) keys win: `"deepseek-v3"` matches before `"deepseek"`.
+- `model_mapping` takes priority over `providers`; if no key matches the model, routing falls back to `providers`.
+
+You can combine both in a single file:
+
+```json
+{
+  "model_mapping": {
+    "deepseek-v3": { "apiUrl": "https://api.deepseek.com/v1", "apiKey": "sk-ds-key" }
+  },
+  "providers": {
+    "claude": [
+      { "apiUrl": "https://api.anthropic.com", "apiKey": "sk-ant-fallback" }
+    ]
+  }
+}
+```
+
+#### Provider List (round-robin / failover)
+
 You can define separate provider lists for **Codex** and **Claude**. The proxy tries providers in the order listed (top down).
 
 **Example `provider.json`**:
@@ -298,7 +337,48 @@ requires_openai_auth = false
 
 #### 配置
 
-在 `~/.cc-proxy/provider.json` 创建配置文件，为 **Codex** 与 **Claude** 分别设置提供商列表（按顺序优先）。
+在 `~/.cc-proxy/provider.json` 创建配置文件。
+
+##### 按模型路由（model_mapping）
+
+使用 `model_mapping` 将不同模型路由到各自的提供商。当请求的 `model` 字段包含某个 key（大小写不敏感子串匹配）时，代理将转发到该 key 对应的 `apiUrl`，并注入对应的 `apiKey`。更长（更具体）的 key 优先匹配。
+
+```json
+{
+  "model_mapping": {
+    "opus":          { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-opus-key" },
+    "sonnet":        { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-sonnet-key" },
+    "deepseek-v3":   { "apiUrl": "https://api.deepseek.com/v1",     "apiKey": "sk-ds-key" },
+    "mimo-v2.5-pro": { "apiUrl": "https://api.mimo.ai/v1",          "apiKey": "sk-mimo-key" },
+    "gpt-4o":        { "apiUrl": "https://api.openai.com/v1",       "apiKey": "sk-oai-key" }
+  }
+}
+```
+
+**匹配规则：**
+
+- 大小写不敏感子串匹配：`"sonnet"` 可命中 `claude-sonnet-4-5`、`claude-sonnet-3-7` 等。
+- 更长的 key 优先：`"deepseek-v3"` 早于 `"deepseek"` 匹配。
+- `model_mapping` 优先级高于 `providers`；若无匹配则回落到 `providers` 路由。
+
+可以在同一个配置文件中同时使用两种方式：
+
+```json
+{
+  "model_mapping": {
+    "deepseek-v3": { "apiUrl": "https://api.deepseek.com/v1", "apiKey": "sk-ds-key" }
+  },
+  "providers": {
+    "claude": [
+      { "apiUrl": "https://api.anthropic.com", "apiKey": "sk-ant-fallback" }
+    ]
+  }
+}
+```
+
+##### 提供商列表（providers，故障切换）
+
+为 **Codex** 与 **Claude** 分别设置提供商列表（按顺序优先，失败自动切换下一个）。
 
 **示例 `provider.json`**：
 

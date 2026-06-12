@@ -20,26 +20,40 @@ pub fn create_app(router: Arc<Router>) -> AxumRouter {
     let state = AppState { router };
 
     AxumRouter::new()
+        // Exact paths for backward compatibility, plus wildcards to capture any sub-path.
+        // The actual forwarded path is always taken from the incoming request URI.
         .route("/v1/messages", post(handle_claude))
+        .route("/v1/{*path}", post(handle_claude))
         .route("/responses", post(handle_codex))
+        .route("/responses/{*path}", post(handle_codex))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 
-/// Handle Claude Code requests
+/// Handle Claude Code requests – forward the full request path as-is.
 async fn handle_claude(
     State(state): State<AppState>,
     request: Request,
 ) -> Result<Response<Body>, Response<Body>> {
-    handle_request(state, request, "claude", "/v1/messages").await
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str().to_owned())
+        .unwrap_or_else(|| "/v1/messages".to_owned());
+    handle_request(state, request, "claude", &path).await
 }
 
-/// Handle Codex requests
+/// Handle Codex requests – forward the full request path as-is.
 async fn handle_codex(
     State(state): State<AppState>,
     request: Request,
 ) -> Result<Response<Body>, Response<Body>> {
-    handle_request(state, request, "codex", "/responses").await
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str().to_owned())
+        .unwrap_or_else(|| "/responses".to_owned());
+    handle_request(state, request, "codex", &path).await
 }
 
 /// Generic request handler

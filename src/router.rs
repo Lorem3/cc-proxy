@@ -1,5 +1,5 @@
 use crate::cache_affinity::{hash_string, CacheAffinityManager};
-use crate::provider::{load_providers, Provider};
+use crate::provider::{load_model_mapping, load_providers, PlatformConfig, Provider};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use axum::{
@@ -9,6 +9,7 @@ use axum::{
 use bytes::Bytes;
 use futures::TryStreamExt;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
@@ -27,8 +28,8 @@ struct ResolvedProvider {
 pub struct Router {
     affinity_manager: Arc<CacheAffinityManager>,
     http_client: reqwest::Client,
-    // Cached providers with platform-specific configs
     cached_providers: Arc<RwLock<Vec<ResolvedProvider>>>,
+    model_mapping: Arc<RwLock<HashMap<String, PlatformConfig>>>,
 }
 
 impl Router {
@@ -44,14 +45,26 @@ impl Router {
             }
         };
 
+        let mapping = match load_model_mapping() {
+            Ok(m) => {
+                tracing::info!("Loaded {} model mapping(s)", m.len());
+                m
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load model_mapping: {}", e);
+                HashMap::new()
+            }
+        };
+
         Ok(Self {
             affinity_manager,
             http_client,
             cached_providers: Arc::new(RwLock::new(providers)),
+            model_mapping: Arc::new(RwLock::new(mapping)),
         })
     }
 
-    /// Reload providers from disk
+    /// Reload providers and model_mapping from disk
     pub async fn reload_providers(&self) -> Result<()> {
         tracing::info!("Reloading providers from config file");
 
@@ -60,7 +73,16 @@ impl Router {
         let mut cache = self.cached_providers.write().await;
         *cache = providers;
 
-        tracing::info!("✓ Reloaded {} provider endpoints", count);
+        let mapping = load_model_mapping().unwrap_or_default();
+        let mapping_count = mapping.len();
+        let mut mm = self.model_mapping.write().await;
+        *mm = mapping;
+
+        tracing::info!(
+            "✓ Reloaded {} provider endpoints, {} model mapping(s)",
+            count,
+            mapping_count
+        );
         Ok(())
     }
 
@@ -132,10 +154,32 @@ impl Router {
             user_id
         );
 
-        // Step 2: Check cache affinity
+        // Step 2: Check model_mapping – takes priority over providers list.
+        // Uses the exact model value from the request body (case-insensitive).
+        {
+            let mapping = self.model_mapping.read().await;
+            if !mapping.is_empty() {
+                if let Some(cfg) = mapping.get(&model) {
+                    let cfg = cfg.clone();
+                    let key = model.clone();
+                    drop(mapping);
+                    tracing::info!(
+                        "model_mapping hit: model={} → key={} url={}",
+                        model,
+                        key,
+                        cfg.api_url
+                    );
+                    return self
+                        .try_mapped_provider(&cfg, endpoint, &body, &headers)
+                        .await;
+                }
+            }
+        }
+
+        // Step 4: Check cache affinity
         let cached_provider_id = self.affinity_manager.get(&affinity_key).await;
 
-        // Step 3: Get cached providers (no disk I/O!)
+        // Step 5: Get cached providers (no disk I/O!)
         let providers_lock = self.cached_providers.read().await;
         let providers: Vec<ResolvedProvider> = providers_lock
             .iter()
@@ -434,6 +478,24 @@ impl Router {
         };
 
         axum_response.body(body).context("Failed to build response")
+    }
+
+    /// Forward a request directly using a model_mapping entry (no affinity/failover).
+    async fn try_mapped_provider(
+        &self,
+        cfg: &PlatformConfig,
+        endpoint: &str,
+        body: &Bytes,
+        headers: &HeaderMap,
+    ) -> Result<Response<Body>> {
+        let provider = ResolvedProvider {
+            kind: String::new(),
+            api_url: cfg.api_url.clone(),
+            api_key: cfg.api_key.clone(),
+            name: None,
+            level: 0,
+        };
+        self.try_provider(&provider, endpoint, body, headers).await
     }
 
     /// Extract user ID from Authorization header (hash of API key)

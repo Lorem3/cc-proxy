@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -157,6 +158,27 @@ pub fn get_config_path() -> Result<PathBuf> {
     } else {
         Ok(legacy_path)
     }
+}
+
+/// Top-level wrapper used only to extract the optional model_mapping field.
+/// Existing ProviderConfig deserialization is unaffected (serde ignores unknown fields).
+#[derive(Debug, Deserialize, Default)]
+struct ModelMappingConfig {
+    #[serde(default)]
+    model_mapping: HashMap<String, PlatformConfig>,
+}
+
+/// Load model-to-provider mappings from the configuration file.
+/// Returns an empty map when the file is absent or the field is not present.
+pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
+    let config_path = get_config_path()?;
+    if !config_path.exists() {
+        return Ok(HashMap::new());
+    }
+    let content = fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read config: {:?}", config_path))?;
+    let cfg: ModelMappingConfig = serde_json::from_str(&content).unwrap_or_default();
+    Ok(cfg.model_mapping)
 }
 
 #[cfg(test)]

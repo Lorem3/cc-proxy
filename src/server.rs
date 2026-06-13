@@ -62,9 +62,19 @@ async fn handle_fallback(
 ) -> Result<Response<Body>, Response<Body>> {
     let path = request.uri().path();
     if path.starts_with("/v1/") {
-        handle_claude(state, request).await
+        let endpoint = request
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_owned())
+            .unwrap_or_else(|| "/v1/messages".to_owned());
+        handle_request(state, request, "claude", &endpoint).await
     } else if path.starts_with("/responses/") {
-        handle_codex(state, request).await
+        let endpoint = request
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_owned())
+            .unwrap_or_else(|| "/responses".to_owned());
+        handle_request(state, request, "codex", &endpoint).await
     } else {
         Err(error_response(StatusCode::NOT_FOUND, "Not found"))
     }

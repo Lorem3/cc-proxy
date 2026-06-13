@@ -1,5 +1,7 @@
 use crate::cache_affinity::{hash_string, CacheAffinityManager};
-use crate::provider::{find_model_mapping, load_model_mapping, load_providers, PlatformConfig, Provider};
+use crate::provider::{
+    find_model_mapping, load_model_mapping, load_providers, PlatformConfig, Provider,
+};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use axum::{

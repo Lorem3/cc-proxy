@@ -1,5 +1,5 @@
 use crate::cache_affinity::{hash_string, CacheAffinityManager};
-use crate::provider::{load_model_mapping, load_providers, PlatformConfig, Provider};
+use crate::provider::{find_model_mapping, load_model_mapping, load_providers, PlatformConfig, Provider};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use axum::{
@@ -155,13 +155,11 @@ impl Router {
         );
 
         // Step 2: Check model_mapping – takes priority over providers list.
-        // Uses the exact model value from the request body (case-insensitive).
+        // When no providers are configured, only model_mapping routing is used.
         {
             let mapping = self.model_mapping.read().await;
             if !mapping.is_empty() {
-                if let Some(cfg) = mapping.get(&model) {
-                    let cfg = cfg.clone();
-                    let key = model.clone();
+                if let Some((key, cfg)) = find_model_mapping(&mapping, &model) {
                     drop(mapping);
                     tracing::info!(
                         "model_mapping hit: model={} → key={} url={}",
@@ -172,6 +170,11 @@ impl Router {
                     return self
                         .try_mapped_provider(&cfg, endpoint, &body, &headers)
                         .await;
+                }
+
+                let providers_empty = self.cached_providers.read().await.is_empty();
+                if providers_empty {
+                    anyhow::bail!("Model '{}' not found in model_mapping", model);
                 }
             }
         }

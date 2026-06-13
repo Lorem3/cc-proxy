@@ -79,14 +79,42 @@ pub struct ProviderMapConfig {
     pub claude: Option<PlatformConfigList>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum ProviderConfig {
-    List { providers: Vec<Provider> },
-    Map { providers: ProviderMapConfig },
+fn flatten_map_providers(providers: ProviderMapConfig) -> Vec<Provider> {
+    let mut flattened = Vec::new();
+
+    if let Some(codex_list) = providers.codex {
+        for cfg in codex_list.into_vec() {
+            flattened.push(Provider {
+                enabled: default_enabled(),
+                level: 0,
+                name: None,
+                api_url: None,
+                api_key: None,
+                codex: Some(cfg),
+                claude: None,
+            });
+        }
+    }
+
+    if let Some(claude_list) = providers.claude {
+        for cfg in claude_list.into_vec() {
+            flattened.push(Provider {
+                enabled: default_enabled(),
+                level: 0,
+                name: None,
+                api_url: None,
+                api_key: None,
+                codex: None,
+                claude: Some(cfg),
+            });
+        }
+    }
+
+    flattened
 }
 
-/// Load providers from configuration file
+/// Load providers from configuration file.
+/// Returns an empty list when `providers` is absent (e.g. model_mapping-only config).
 pub fn load_providers() -> Result<Vec<Provider>> {
     let config_path = get_config_path()?;
 
@@ -98,51 +126,31 @@ pub fn load_providers() -> Result<Vec<Provider>> {
     let content = fs::read_to_string(&config_path)
         .with_context(|| format!("Failed to read provider config: {:?}", config_path))?;
 
-    let config: ProviderConfig = serde_json::from_str(&content)
+    let root: serde_json::Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse provider config: {:?}", config_path))?;
 
-    let providers = match config {
-        ProviderConfig::List { providers } => providers,
-        ProviderConfig::Map { providers } => {
-            let mut flattened = Vec::new();
-
-            if let Some(codex_list) = providers.codex {
-                for cfg in codex_list.into_vec() {
-                    flattened.push(Provider {
-                        enabled: default_enabled(),
-                        level: 0,
-                        name: None,
-                        api_url: None,
-                        api_key: None,
-                        codex: Some(cfg),
-                        claude: None,
-                    });
-                }
-            }
-
-            if let Some(claude_list) = providers.claude {
-                for cfg in claude_list.into_vec() {
-                    flattened.push(Provider {
-                        enabled: default_enabled(),
-                        level: 0,
-                        name: None,
-                        api_url: None,
-                        api_key: None,
-                        codex: None,
-                        claude: Some(cfg),
-                    });
-                }
-            }
-
-            if flattened.is_empty() {
-                anyhow::bail!("No providers defined in provider.json");
-            }
-
-            flattened
-        }
+    let Some(providers_value) = root.get("providers") else {
+        tracing::info!("No providers field in config; routing via model_mapping only");
+        return Ok(Vec::new());
     };
 
-    Ok(providers)
+    if providers_value.is_null() {
+        return Ok(Vec::new());
+    }
+
+    if providers_value.is_array() {
+        let providers: Vec<Provider> = serde_json::from_value(providers_value.clone())
+            .with_context(|| "Failed to parse providers list")?;
+        return Ok(providers);
+    }
+
+    if providers_value.is_object() {
+        let map_config: ProviderMapConfig = serde_json::from_value(providers_value.clone())
+            .with_context(|| "Failed to parse providers map")?;
+        return Ok(flatten_map_providers(map_config));
+    }
+
+    anyhow::bail!("Invalid providers format in provider.json");
 }
 
 /// Get configuration file path
@@ -161,7 +169,6 @@ pub fn get_config_path() -> Result<PathBuf> {
 }
 
 /// Top-level wrapper used only to extract the optional model_mapping field.
-/// Existing ProviderConfig deserialization is unaffected (serde ignores unknown fields).
 #[derive(Debug, Deserialize, Default)]
 struct ModelMappingConfig {
     #[serde(default)]
@@ -179,6 +186,21 @@ pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
         .with_context(|| format!("Failed to read config: {:?}", config_path))?;
     let cfg: ModelMappingConfig = serde_json::from_str(&content).unwrap_or_default();
     Ok(cfg.model_mapping)
+}
+
+/// Find the best matching model_mapping entry for a request model.
+/// Case-insensitive substring match; longer keys take priority.
+pub fn find_model_mapping(
+    mapping: &HashMap<String, PlatformConfig>,
+    model: &str,
+) -> Option<(String, PlatformConfig)> {
+    let model_lower = model.to_ascii_lowercase();
+
+    mapping
+        .iter()
+        .filter(|(key, _)| model_lower.contains(&key.to_ascii_lowercase()))
+        .max_by_key(|(key, _)| key.len())
+        .map(|(key, cfg)| (key.clone(), cfg.clone()))
 }
 
 #[cfg(test)]
@@ -239,43 +261,10 @@ mod tests {
         }
         "#;
 
-        let config: ProviderConfig = serde_json::from_str(json).unwrap();
-        let providers = match config {
-            ProviderConfig::List { providers } => providers,
-            ProviderConfig::Map { providers } => {
-                let mut flattened = Vec::new();
-
-                if let Some(codex) = providers.codex {
-                    for cfg in codex.into_vec() {
-                        flattened.push(Provider {
-                            enabled: default_enabled(),
-                            level: 0,
-                            name: None,
-                            api_url: None,
-                            api_key: None,
-                            codex: Some(cfg),
-                            claude: None,
-                        });
-                    }
-                }
-
-                if let Some(claude) = providers.claude {
-                    for cfg in claude.into_vec() {
-                        flattened.push(Provider {
-                            enabled: default_enabled(),
-                            level: 0,
-                            name: None,
-                            api_url: None,
-                            api_key: None,
-                            codex: None,
-                            claude: Some(cfg),
-                        });
-                    }
-                }
-
-                flattened
-            }
-        };
+        let root: serde_json::Value = serde_json::from_str(json).unwrap();
+        let map_config: ProviderMapConfig =
+            serde_json::from_value(root["providers"].clone()).unwrap();
+        let providers = flatten_map_providers(map_config);
 
         assert_eq!(providers.len(), 3);
         let provider = &providers[0];
@@ -289,6 +278,42 @@ mod tests {
             providers[2].claude.as_ref().unwrap().api_url,
             "https://claude2.api"
         );
+    }
+
+    #[test]
+    fn load_providers_returns_empty_when_only_model_mapping() {
+        let json = r#"
+        {
+            "model_mapping": {
+                "gpt-4": { "apiUrl": "https://api.example.com", "apiKey": "key" }
+            }
+        }
+        "#;
+
+        let root: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert!(root.get("providers").is_none());
+
+        let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.model_mapping.len(), 1);
+    }
+
+    #[test]
+    fn load_providers_parses_empty_providers_with_model_mapping() {
+        let json = r#"
+        {
+            "providers": {},
+            "model_mapping": {
+                "gpt-4": { "apiUrl": "https://api.example.com", "apiKey": "key" }
+            }
+        }
+        "#;
+
+        let root: serde_json::Value = serde_json::from_str(json).unwrap();
+        let map_config: ProviderMapConfig =
+            serde_json::from_value(root["providers"].clone()).unwrap();
+        let providers = flatten_map_providers(map_config);
+
+        assert!(providers.is_empty());
     }
 
     #[test]
@@ -308,5 +333,56 @@ mod tests {
 
         let claude_config = provider.get_platform_config("claude").unwrap();
         assert_eq!(claude_config.api_url, "https://shared.api.com");
+    }
+
+    #[test]
+    fn find_model_mapping_uses_case_insensitive_substring() {
+        let mut mapping = HashMap::new();
+        mapping.insert(
+            "sonnet".to_string(),
+            PlatformConfig {
+                api_url: "https://sonnet.api".to_string(),
+                api_key: "sonnet-key".to_string(),
+            },
+        );
+
+        let (_, cfg) = find_model_mapping(&mapping, "claude-sonnet-4-5").unwrap();
+        assert_eq!(cfg.api_url, "https://sonnet.api");
+    }
+
+    #[test]
+    fn find_model_mapping_prefers_longer_keys() {
+        let mut mapping = HashMap::new();
+        mapping.insert(
+            "mimo-v2.5".to_string(),
+            PlatformConfig {
+                api_url: "https://api.xiaomimimo.com/anthropic".to_string(),
+                api_key: "sk-base".to_string(),
+            },
+        );
+        mapping.insert(
+            "mimo-v2.5-pro".to_string(),
+            PlatformConfig {
+                api_url: "https://api.xiaomimimo.com/anthropic".to_string(),
+                api_key: "sk-pro".to_string(),
+            },
+        );
+        mapping.insert(
+            "deepseek-v3".to_string(),
+            PlatformConfig {
+                api_url: "https://api.deepseek.com/v1".to_string(),
+                api_key: "sk-ds-key".to_string(),
+            },
+        );
+
+        let (key, cfg) = find_model_mapping(&mapping, "mimo-v2.5-pro").unwrap();
+        assert_eq!(key, "mimo-v2.5-pro");
+        assert_eq!(cfg.api_key, "sk-pro");
+
+        let (key, _) = find_model_mapping(&mapping, "custom-mimo-v2.5-chat").unwrap();
+        assert_eq!(key, "mimo-v2.5");
+
+        let (_, cfg) = find_model_mapping(&mapping, "deepseek-v3-chat").unwrap();
+        assert_eq!(cfg.api_url, "https://api.deepseek.com/v1");
     }
 }

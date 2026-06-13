@@ -20,12 +20,11 @@ pub fn create_app(router: Arc<Router>) -> AxumRouter {
     let state = AppState { router };
 
     AxumRouter::new()
-        // Exact paths for backward compatibility, plus wildcards to capture any sub-path.
-        // The actual forwarded path is always taken from the incoming request URI.
+        // Exact paths for common endpoints; sub-paths are handled by fallback.
+        // The forwarded path is always taken from the incoming request URI.
         .route("/v1/messages", post(handle_claude))
-        .route("/v1/{*path}", post(handle_claude))
         .route("/responses", post(handle_codex))
-        .route("/responses/{*path}", post(handle_codex))
+        .fallback(handle_fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -54,6 +53,21 @@ async fn handle_codex(
         .map(|pq| pq.as_str().to_owned())
         .unwrap_or_else(|| "/responses".to_owned());
     handle_request(state, request, "codex", &path).await
+}
+
+/// Handle sub-paths not matched by exact routes (e.g. /v1/messages/count_tokens).
+async fn handle_fallback(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response<Body>, Response<Body>> {
+    let path = request.uri().path();
+    if path.starts_with("/v1/") {
+        handle_claude(state, request).await
+    } else if path.starts_with("/responses/") {
+        handle_codex(state, request).await
+    } else {
+        Err(error_response(StatusCode::NOT_FOUND, "Not found"))
+    }
 }
 
 /// Generic request handler
@@ -89,7 +103,7 @@ async fn handle_request(
             tracing::error!("Request routing failed: {}", e);
             Err(error_response(
                 StatusCode::BAD_GATEWAY,
-                &format!("All providers failed: {}", e),
+                &format!("Request routing failed: {}", e),
             ))
         }
     }

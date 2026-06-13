@@ -1,11 +1,9 @@
-mod cache_affinity;
 mod provider;
 mod router;
 mod server;
 mod settings;
 
 use anyhow::Result;
-use cache_affinity::CacheAffinityManager;
 use local_ip_address::{list_afinet_netifas, local_ip};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use router::Router;
@@ -18,7 +16,6 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:18100";
-const CACHE_TTL: u64 = 300; // 5 minutes
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -74,13 +71,7 @@ async fn start_daemon() -> Result<()> {
     }
     println!();
 
-    // Initialize cache affinity manager
-    let affinity_manager = Arc::new(CacheAffinityManager::new(CACHE_TTL));
-
-    // Start cleanup task
-    CacheAffinityManager::start_cleanup_task(affinity_manager.clone());
-
-    // Keep provider responses compressed so headers stay consistent end-to-end.
+    // Keep upstream responses compressed so headers stay consistent end-to-end.
     let http_client = reqwest::Client::builder()
         .no_gzip()
         .no_deflate()
@@ -88,7 +79,7 @@ async fn start_daemon() -> Result<()> {
         .build()?;
 
     // Initialize router
-    let router = Arc::new(Router::new(affinity_manager.clone(), http_client)?);
+    let router = Arc::new(Router::new(http_client)?);
 
     // Start config file watcher
     start_config_watcher(router.clone())?;
@@ -100,7 +91,7 @@ async fn start_daemon() -> Result<()> {
     println!("   Claude Code: POST /v1/messages");
     println!("   Codex:       POST /responses");
     println!();
-    println!("💡 Tip: Edit ~/.cc-proxy/provider.json to configure providers");
+    println!("💡 Tip: Edit ~/.cc-proxy/provider.json to configure model_mapping");
     println!();
 
     // Run server (blocks until shutdown)
@@ -161,11 +152,11 @@ fn start_config_watcher(router: Arc<Router>) -> Result<()> {
 
             tracing::info!("Config file changed: {:?}", event.paths);
 
-            // Reload providers with a small delay to avoid partial writes
+            // Reload config with a small delay to avoid partial writes
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            if let Err(e) = router.reload_providers().await {
-                tracing::error!("Failed to reload providers: {}", e);
+            if let Err(e) = router.reload_config().await {
+                tracing::error!("Failed to reload model_mapping: {}", e);
             }
         }
     });
@@ -230,14 +221,13 @@ fn print_help() {
     println!("    help      Show this help message");
     println!();
     println!("DESCRIPTION:");
-    println!("    cc-proxy is a smart HTTP proxy that routes Claude Code and Codex");
-    println!("    requests to multiple providers with automatic failover and cache");
-    println!("    affinity for maximum cost savings.");
+    println!("    cc-proxy is an HTTP proxy that routes Claude Code and Codex");
+    println!("    requests by model via model_mapping, forwarding each model to");
+    println!("    its configured upstream URL and API key.");
     println!();
     println!("FEATURES:");
-    println!("    • Model-aware routing (supports exact and wildcard matching)");
-    println!("    • Cache affinity (maintains provider for 5min for cache hits)");
-    println!("    • Automatic failover (tries multiple providers)");
+    println!("    • Model-aware routing via model_mapping (substring match)");
+    println!("    • Optional upstream model name replacement");
     println!("    • Auto-configuration (sets up Claude Code & Codex)");
     println!();
     println!("CONFIGURATION:");

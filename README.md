@@ -4,16 +4,16 @@ Language | 语言: [English](#english) · [中文](#中文)
 
 ## English
 
-**A lightweight, intelligent HTTP proxy for Claude Code and Codex CLIs.**
+**A lightweight HTTP proxy for Claude Code and Codex CLIs.**
 
-`cc-proxy` sits between your AI CLI tools and upstream providers. It optimizes for cost and reliability by enforcing **sticky routing** (to maximize prompt caching) and handling **automatic failover** seamlessly.
+`cc-proxy` sits between your AI CLI tools and upstream APIs. It routes each request by the `model` field in the request body, forwarding to the matching `apiUrl` with the configured `apiKey`.
 
-## ⚡ Key Features
+## Key Features
 
-  * **💰 Sticky Routing**: Maintains provider affinity for 5 minutes. This keeps the prompt cache warm, potentially reducing API costs.
-  * **🛡️ Automatic Failover**: If a provider goes down, `cc-proxy` instantly retries the request with the next provider in your priority list.
-  * **⚙️ Auto-Configuration**: Automatically manages the proxy settings for Claude Code and Codex CLIs—no manual export needed.
-  * **🚀 Lightweight**: A single Rust binary with no database or heavy dependencies.
+  * **Model-aware routing**: Route each model to a different upstream via `model_mapping`.
+  * **Optional model rename**: Replace the request `model` field before forwarding (e.g. map `deepseek-v3` to `deepseek-v4-pro`).
+  * **Auto-Configuration**: Automatically manages the proxy settings for Claude Code and Codex CLIs—no manual export needed.
+  * **Lightweight**: A single Rust binary with no database or heavy dependencies.
 
 -----
 
@@ -96,7 +96,7 @@ cc-proxy stop
 
 `cc-proxy` listens on `0.0.0.0:18100` by default and automatically detects your LAN IP.
 Share the reported URL (for example `http://192.168.1.252:18100`) with other machines
-so their CLIs can reuse the same proxy and provider configuration.
+so their CLIs can reuse the same proxy and model_mapping configuration.
 
 ### Machine B (remote CLI) example
 
@@ -142,18 +142,22 @@ requires_openai_auth = false
 
 Create your configuration file at `~/.cc-proxy/provider.json`.
 
-#### Model Mapping (per-model routing)
+#### Model Mapping
 
-Use `model_mapping` to route individual models to different providers. When the request's `model` field contains a key (case-insensitive substring match), the proxy forwards to that entry's `apiUrl` and injects its `apiKey`. Longer, more specific keys take priority.
+Use `model_mapping` to route each model to a different upstream. When the request's `model` field contains a key (case-insensitive substring match), the proxy forwards to that entry's `apiUrl` and injects its `apiKey`. Longer, more specific keys take priority.
+
+Optionally set `name` to replace the entire `model` field in the request body before forwarding.
 
 ```json
 {
   "model_mapping": {
-    "opus":          { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-opus-key" },
-    "sonnet":        { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-sonnet-key" },
-    "deepseek-v3":   { "apiUrl": "https://api.deepseek.com/v1",     "apiKey": "sk-ds-key" },
-    "mimo-v2.5-pro": { "apiUrl": "https://api.mimo.ai/v1",          "apiKey": "sk-mimo-key" },
-    "gpt-4o":        { "apiUrl": "https://api.openai.com/v1",       "apiKey": "sk-oai-key" }
+    "deepseek-v3": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-ds-key",
+      "name": "deepseek-v4-pro"
+    },
+    "mimo-v2.5-pro": { "apiUrl": "https://api.xiaomimimo.com/anthropic", "apiKey": "sk-mimo-key" },
+    "sonnet":        { "apiUrl": "https://api.anthropic.com",            "apiKey": "sk-ant-sonnet-key" }
   }
 }
 ```
@@ -161,58 +165,24 @@ Use `model_mapping` to route individual models to different providers. When the 
 **Matching rules:**
 
 - Match is case-insensitive substring: `"sonnet"` matches `claude-sonnet-4-5`, `claude-sonnet-3-7`, etc.
-- More specific (longer) keys win: `"deepseek-v3"` matches before `"deepseek"`.
-- `model_mapping` takes priority over `providers`; if no key matches the model, routing falls back to `providers`.
-
-You can combine both in a single file:
-
-```json
-{
-  "model_mapping": {
-    "deepseek-v3": { "apiUrl": "https://api.deepseek.com/v1", "apiKey": "sk-ds-key" }
-  },
-  "providers": {
-    "claude": [
-      { "apiUrl": "https://api.anthropic.com", "apiKey": "sk-ant-fallback" }
-    ]
-  }
-}
-```
-
-#### Provider List (round-robin / failover)
-
-You can define separate provider lists for **Codex** and **Claude**. The proxy tries providers in the order listed (top down).
-
-**Example `provider.json`**:
-
-```json
-{
-  "providers": {
-    "codex": [
-      { "apiUrl": "https://api.openai.com/v1", "apiKey": "YOUR_OPENAI_API_KEY" },
-      { "apiUrl": "https://api.openai.com/v1", "apiKey": "YOUR_OPENAI_API_KEY_1" }
-    ],
-    "claude": [
-      { "apiUrl": "https://api.anthropic.com", "apiKey": "YOUR_ANTHROPIC_API_KEY" }
-    ]
-  }
-}
-```
+- More specific (longer) keys win: `"mimo-v2.5-pro"` matches before `"mimo-v2.5"`.
+- If `name` is set, the request body's `model` field is replaced entirely before forwarding.
+- If no key matches the model, the request fails with an error.
 
 -----
 
 ## 中文
 
-**为 Claude Code 与 Codex CLI 提供的轻量智能 HTTP 代理。**
+**为 Claude Code 与 Codex CLI 提供的轻量 HTTP 代理。**
 
-`cc-proxy` 位于本地 CLI 与上游模型服务之间，通过 **粘性路由**（维持 5 分钟的同源请求以利用缓存）和 **自动故障切换**，在可靠性与成本间取得平衡。
+`cc-proxy` 位于本地 CLI 与上游 API 之间，根据请求体中的 `model` 字段，通过 `model_mapping` 将请求转发到对应的 `apiUrl`，并注入配置的 `apiKey`。
 
-### ⚡ 核心特性
+### 核心特性
 
-  * **💰 粘性路由**：保持同一提供商 5 分钟，利用提示缓存降低调用成本。
-  * **🛡️ 自动故障切换**：上游不可用时自动切到下一个提供商。
-  * **⚙️ 自动配置**：无需手动导出代理变量，自动配置 Claude Code 与 Codex CLI。
-  * **🚀 轻量单可执行文件**：纯 Rust 实现，无数据库与重依赖。
+  * **按模型路由**：通过 `model_mapping` 将不同 model 转发到不同上游。
+  * **可选 model 替换**：转发前可将请求体中的 `model` 整字段替换为配置的 `name`。
+  * **自动配置**：无需手动导出代理变量，自动配置 Claude Code 与 Codex CLI。
+  * **轻量单可执行文件**：纯 Rust 实现，无数据库与重依赖。
 
 -----
 
@@ -293,7 +263,7 @@ cc-proxy stop
 ```
 
 默认会监听 `0.0.0.0:18100` 并自动检测本机可访问的 IP。
-将自动提示的地址（如 `http://192.168.1.252:18100`）分享给其他主机，即可让它们共用同一个代理与 provider 配置。
+将自动提示的地址（如 `http://192.168.1.252:18100`）分享给其他主机，即可让它们共用同一个代理与 model_mapping 配置。
 
 ### 机器 B（远程 CLI）示例
 
@@ -341,16 +311,20 @@ requires_openai_auth = false
 
 ##### 按模型路由（model_mapping）
 
-使用 `model_mapping` 将不同模型路由到各自的提供商。当请求的 `model` 字段包含某个 key（大小写不敏感子串匹配）时，代理将转发到该 key 对应的 `apiUrl`，并注入对应的 `apiKey`。更长（更具体）的 key 优先匹配。
+使用 `model_mapping` 将不同 model 路由到各自的上游。当请求的 `model` 字段包含某个 key（大小写不敏感子串匹配）时，代理将转发到该 key 对应的 `apiUrl`，并注入对应的 `apiKey`。更长（更具体）的 key 优先匹配。
+
+可选配置 `name`，在转发前将请求体中的 `model` 整字段替换为指定值。
 
 ```json
 {
   "model_mapping": {
-    "opus":          { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-opus-key" },
-    "sonnet":        { "apiUrl": "https://api.anthropic.com",       "apiKey": "sk-ant-sonnet-key" },
-    "deepseek-v3":   { "apiUrl": "https://api.deepseek.com/v1",     "apiKey": "sk-ds-key" },
-    "mimo-v2.5-pro": { "apiUrl": "https://api.mimo.ai/v1",          "apiKey": "sk-mimo-key" },
-    "gpt-4o":        { "apiUrl": "https://api.openai.com/v1",       "apiKey": "sk-oai-key" }
+    "deepseek-v3": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-ds-key",
+      "name": "deepseek-v4-pro"
+    },
+    "mimo-v2.5-pro": { "apiUrl": "https://api.xiaomimimo.com/anthropic", "apiKey": "sk-mimo-key" },
+    "sonnet":        { "apiUrl": "https://api.anthropic.com",            "apiKey": "sk-ant-sonnet-key" }
   }
 }
 ```
@@ -358,43 +332,9 @@ requires_openai_auth = false
 **匹配规则：**
 
 - 大小写不敏感子串匹配：`"sonnet"` 可命中 `claude-sonnet-4-5`、`claude-sonnet-3-7` 等。
-- 更长的 key 优先：`"deepseek-v3"` 早于 `"deepseek"` 匹配。
-- `model_mapping` 优先级高于 `providers`；若无匹配则回落到 `providers` 路由。
-
-可以在同一个配置文件中同时使用两种方式：
-
-```json
-{
-  "model_mapping": {
-    "deepseek-v3": { "apiUrl": "https://api.deepseek.com/v1", "apiKey": "sk-ds-key" }
-  },
-  "providers": {
-    "claude": [
-      { "apiUrl": "https://api.anthropic.com", "apiKey": "sk-ant-fallback" }
-    ]
-  }
-}
-```
-
-##### 提供商列表（providers，故障切换）
-
-为 **Codex** 与 **Claude** 分别设置提供商列表（按顺序优先，失败自动切换下一个）。
-
-**示例 `provider.json`**：
-
-```json
-{
-  "providers": {
-    "codex": [
-      { "apiUrl": "https://api.openai.com/v1", "apiKey": "YOUR_OPENAI_API_KEY" },
-      { "apiUrl": "https://api.openai.com/v1", "apiKey": "YOUR_OPENAI_API_KEY_1" }
-    ],
-    "claude": [
-      { "apiUrl": "https://api.anthropic.com", "apiKey": "YOUR_ANTHROPIC_API_KEY" }
-    ]
-  }
-}
-```
+- 更长的 key 优先：`"mimo-v2.5-pro"` 早于 `"mimo-v2.5"` 匹配。
+- 配置了 `name` 时，转发前将请求体 `model` 整字段替换为 `name`。
+- 若无匹配 key，请求返回错误。
 
 -----
 

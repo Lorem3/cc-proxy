@@ -1,7 +1,4 @@
-use crate::cache_affinity::{hash_string, CacheAffinityManager};
-use crate::provider::{
-    find_model_mapping, load_model_mapping, load_providers, PlatformConfig, Provider,
-};
+use crate::provider::{find_model_mapping, load_model_mapping, PlatformConfig};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use axum::{
@@ -13,40 +10,17 @@ use futures::TryStreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio_util::io::StreamReader;
 
 #[derive(Clone)]
-struct ResolvedProvider {
-    kind: String,
-    api_url: String,
-    api_key: String,
-    name: Option<String>,
-    level: i32,
-}
-
-#[derive(Clone)]
 pub struct Router {
-    affinity_manager: Arc<CacheAffinityManager>,
     http_client: reqwest::Client,
-    cached_providers: Arc<RwLock<Vec<ResolvedProvider>>>,
     model_mapping: Arc<RwLock<HashMap<String, PlatformConfig>>>,
 }
 
 impl Router {
-    pub fn new(
-        affinity_manager: Arc<CacheAffinityManager>,
-        http_client: reqwest::Client,
-    ) -> Result<Self> {
-        let providers = match Self::load_and_flatten_providers() {
-            Ok(providers) => providers,
-            Err(e) => {
-                tracing::warn!("Failed to load providers: {}", e);
-                Vec::new()
-            }
-        };
-
+    pub fn new(http_client: reqwest::Client) -> Result<Self> {
         let mapping = match load_model_mapping() {
             Ok(m) => {
                 tracing::info!("Loaded {} model mapping(s)", m.len());
@@ -59,75 +33,25 @@ impl Router {
         };
 
         Ok(Self {
-            affinity_manager,
             http_client,
-            cached_providers: Arc::new(RwLock::new(providers)),
             model_mapping: Arc::new(RwLock::new(mapping)),
         })
     }
 
-    /// Reload providers and model_mapping from disk
-    pub async fn reload_providers(&self) -> Result<()> {
-        tracing::info!("Reloading providers from config file");
+    /// Reload model_mapping from disk
+    pub async fn reload_config(&self) -> Result<()> {
+        tracing::info!("Reloading model_mapping from config file");
 
-        let providers = Self::load_and_flatten_providers()?;
-        let count = providers.len();
-        let mut cache = self.cached_providers.write().await;
-        *cache = providers;
-
-        let mapping = load_model_mapping().unwrap_or_default();
+        let mapping = load_model_mapping()?;
         let mapping_count = mapping.len();
         let mut mm = self.model_mapping.write().await;
         *mm = mapping;
 
-        tracing::info!(
-            "✓ Reloaded {} provider endpoints, {} model mapping(s)",
-            count,
-            mapping_count
-        );
+        tracing::info!("✓ Reloaded {} model mapping(s)", mapping_count);
         Ok(())
     }
 
-    fn load_and_flatten_providers() -> Result<Vec<ResolvedProvider>> {
-        let providers = load_providers()?;
-
-        let resolved = Self::flatten_providers(providers);
-        let codex_count = resolved.iter().filter(|p| p.kind == "codex").count();
-        let claude_count = resolved.iter().filter(|p| p.kind == "claude").count();
-
-        tracing::info!(
-            "Loaded {} provider endpoints (codex={}, claude={})",
-            resolved.len(),
-            codex_count,
-            claude_count
-        );
-
-        Ok(resolved)
-    }
-
-    fn flatten_providers(providers: Vec<Provider>) -> Vec<ResolvedProvider> {
-        let mut resolved = Vec::new();
-
-        for provider in providers.into_iter().filter(|p| p.enabled) {
-            for kind in ["codex", "claude"] {
-                if let Some(config) = provider.get_platform_config(kind) {
-                    if !config.api_url.is_empty() && !config.api_key.is_empty() {
-                        resolved.push(ResolvedProvider {
-                            kind: kind.to_string(),
-                            api_url: config.api_url,
-                            api_key: config.api_key,
-                            name: provider.name.clone(),
-                            level: provider.level,
-                        });
-                    }
-                }
-            }
-        }
-
-        resolved
-    }
-
-    /// Route a request to the appropriate provider
+    /// Route a request using model_mapping only.
     pub async fn route_request(
         &self,
         kind: &str,
@@ -135,9 +59,6 @@ impl Router {
         body: Bytes,
         headers: HeaderMap,
     ) -> Result<Response<Body>> {
-        let start_time = Instant::now();
-
-        // Step 1: Extract request info
         let request_json: Value =
             serde_json::from_slice(&body).context("Failed to parse request body as JSON")?;
 
@@ -146,180 +67,54 @@ impl Router {
             .unwrap_or("unknown")
             .to_string();
 
-        let user_id = self.extract_user_id(&headers);
-        let affinity_key = CacheAffinityManager::generate_key(&user_id, kind, &model);
+        tracing::debug!("Request: kind={}, model={}", kind, model);
 
-        tracing::debug!(
-            "Request: kind={}, model={}, user_id={}",
-            kind,
-            model,
-            user_id
-        );
-
-        // Step 2: Check model_mapping – takes priority over providers list.
-        // When no providers are configured, only model_mapping routing is used.
-        {
-            let mapping = self.model_mapping.read().await;
-            if !mapping.is_empty() {
-                if let Some((key, cfg)) = find_model_mapping(&mapping, &model) {
-                    drop(mapping);
-                    tracing::info!(
-                        "model_mapping hit: model={} → key={} url={}",
-                        model,
-                        key,
-                        cfg.api_url
-                    );
-                    return self
-                        .try_mapped_provider(&cfg, endpoint, &body, &headers)
-                        .await;
-                }
-
-                let providers_empty = self.cached_providers.read().await.is_empty();
-                if providers_empty {
-                    anyhow::bail!("Model '{}' not found in model_mapping", model);
-                }
-            }
+        let mapping = self.model_mapping.read().await;
+        if mapping.is_empty() {
+            anyhow::bail!("No model_mapping configured");
         }
 
-        // Step 4: Check cache affinity
-        let cached_provider_id = self.affinity_manager.get(&affinity_key).await;
+        let Some((key, cfg)) = find_model_mapping(&mapping, &model) else {
+            anyhow::bail!("Model '{}' not found in model_mapping", model);
+        };
+        let cfg = cfg.clone();
+        drop(mapping);
 
-        // Step 5: Get cached providers (no disk I/O!)
-        let providers_lock = self.cached_providers.read().await;
-        let providers: Vec<ResolvedProvider> = providers_lock
-            .iter()
-            .filter(|p| p.kind == kind)
-            .cloned()
-            .collect();
-        drop(providers_lock); // Release lock immediately
-
-        if providers.is_empty() {
-            anyhow::bail!("No providers available for {} model: {}", kind, model);
-        }
-
-        tracing::debug!(
-            "Using {} cached providers: {:?}",
-            providers.len(),
-            providers
-                .iter()
-                .map(Self::provider_label)
-                .collect::<Vec<_>>()
-        );
-
-        // Step 4: Try cached provider first if available
-        if let Some(ref cached_id) = cached_provider_id {
-            if let Some(provider) = providers
-                .iter()
-                .find(|p| Self::provider_id(p) == *cached_id)
-            {
-                tracing::debug!(
-                    "Trying cached provider: {} (level {})",
-                    Self::provider_label(provider),
-                    provider.level
-                );
-
-                match self.try_provider(provider, endpoint, &body, &headers).await {
-                    Ok(response) => {
-                        self.affinity_manager
-                            .set(&affinity_key, &Self::provider_id(provider))
-                            .await;
-
-                        let duration = start_time.elapsed();
-                        tracing::info!(
-                            "✓ {} {} → {} [cached] {}ms",
-                            kind,
-                            model,
-                            Self::provider_label(provider),
-                            duration.as_millis()
-                        );
-
-                        return Ok(response);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "✗ Cached provider failed: {} - {}",
-                            Self::provider_label(provider),
-                            e
-                        );
-                        self.affinity_manager.invalidate(&affinity_key).await;
-                    }
-                }
-            }
-        }
-
-        // Step 5: Try all providers in priority order
-        for (idx, provider) in providers.iter().enumerate() {
-            // Skip if this is the cached provider we already tried
-            if cached_provider_id.as_ref() == Some(&Self::provider_id(provider)) {
-                continue;
-            }
-
-            tracing::debug!(
-                "Trying provider: {} (priority #{} level {})",
-                Self::provider_label(provider),
-                idx + 1,
-                provider.level
+        let forward_body = if let Some(name) = cfg.name.as_ref().filter(|n| !n.is_empty()) {
+            tracing::info!(
+                "model_mapping hit: model={} → key={} url={} name={}",
+                model,
+                key,
+                cfg.api_url,
+                name
             );
-
-            match self.try_provider(provider, endpoint, &body, &headers).await {
-                Ok(response) => {
-                    self.affinity_manager
-                        .set(&affinity_key, &Self::provider_id(provider))
-                        .await;
-
-                    let duration = start_time.elapsed();
-                    tracing::info!(
-                        "✓ {} {} → {} {}ms",
-                        kind,
-                        model,
-                        Self::provider_label(provider),
-                        duration.as_millis()
-                    );
-
-                    return Ok(response);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "✗ Provider failed: {} - {}",
-                        Self::provider_label(provider),
-                        e
-                    );
-                }
-            }
-        }
-
-        // Step 6: All providers failed
-        anyhow::bail!(
-            "All {} providers failed for model: {}",
-            providers.len(),
-            model
-        )
-    }
-
-    fn provider_id(provider: &ResolvedProvider) -> String {
-        format!("{}::{}", provider.kind, provider.api_url)
-    }
-
-    fn provider_label(provider: &ResolvedProvider) -> String {
-        if let Some(name) = provider.name.as_ref().filter(|n| !n.is_empty()) {
-            format!("{} ({})", name, provider.api_url)
+            let mut modified = request_json;
+            modified["model"] = Value::String(name.clone());
+            Bytes::from(serde_json::to_vec(&modified)?)
         } else {
-            provider.api_url.clone()
-        }
+            tracing::info!(
+                "model_mapping hit: model={} → key={} url={}",
+                model,
+                key,
+                cfg.api_url
+            );
+            body
+        };
+
+        self.forward_request(&cfg, endpoint, &forward_body, &headers)
+            .await
     }
 
-    /// Try to forward request to a specific provider
-    async fn try_provider(
+    /// Forward request to the mapped upstream.
+    async fn forward_request(
         &self,
-        provider: &ResolvedProvider,
+        cfg: &PlatformConfig,
         endpoint: &str,
         body: &Bytes,
         headers: &HeaderMap,
     ) -> Result<Response<Body>> {
-        // Construct URL
-        let url = format!("{}{}", provider.api_url.trim_end_matches('/'), endpoint);
+        let url = format!("{}{}", cfg.api_url.trim_end_matches('/'), endpoint);
 
-        // Prepare headers - convert from axum HeaderMap to reqwest HeaderMap
         let mut req_headers = reqwest::header::HeaderMap::new();
         for (key, value) in headers {
             if key == "host" || key == "authorization" {
@@ -341,7 +136,6 @@ impl Router {
                 continue;
             }
 
-            // Convert header name and value
             if let Ok(req_name) = reqwest::header::HeaderName::from_bytes(key.as_str().as_bytes()) {
                 if let Ok(val) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
                     req_headers.insert(req_name, val);
@@ -349,13 +143,11 @@ impl Router {
             }
         }
 
-        // Set provider's API key
         req_headers.insert(
             reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", provider.api_key))?,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", cfg.api_key))?,
         );
 
-        // Ensure Accept header
         if !req_headers.contains_key(reqwest::header::ACCEPT) {
             req_headers.insert(
                 reqwest::header::ACCEPT,
@@ -363,7 +155,6 @@ impl Router {
             );
         }
 
-        // Forward request
         let response = self
             .http_client
             .post(&url)
@@ -371,28 +162,26 @@ impl Router {
             .body(body.to_vec())
             .send()
             .await
-            .context("Failed to send request to provider")?;
+            .context("Failed to send request to upstream")?;
 
         let status = response.status();
 
         if !status.is_success() {
-            anyhow::bail!("Provider returned error status: {}", status);
+            anyhow::bail!("Upstream returned error status: {}", status);
         }
 
-        // Check for WAF/firewall blocks (provider returns 200 but with error content)
         if let Some(tengine_error) = response.headers().get("x-tengine-error") {
             match tengine_error.to_str() {
                 Ok(err) => tracing::warn!(
-                    "Provider indicated potential WAF block via x-tengine-error={}, forwarding anyway",
+                    "Upstream indicated potential WAF block via x-tengine-error={}, forwarding anyway",
                     err
                 ),
                 Err(_) => tracing::warn!(
-                    "Provider indicated potential WAF block via x-tengine-error (non-UTF8), forwarding anyway"
+                    "Upstream indicated potential WAF block via x-tengine-error (non-UTF8), forwarding anyway"
                 ),
             }
         }
 
-        // Verify content-type is JSON/SSE; warn but continue so we don't mask upstream responses
         if let Some(content_type) = response.headers().get("content-type") {
             match content_type.to_str() {
                 Ok(ct_str)
@@ -400,22 +189,20 @@ impl Router {
                         && !ct_str.contains("text/event-stream") =>
                 {
                     tracing::warn!(
-                        "Provider returned unexpected content-type '{}', forwarding response anyway",
+                        "Upstream returned unexpected content-type '{}', forwarding response anyway",
                         ct_str
                     );
                 }
                 Err(_) => tracing::warn!(
-                    "Provider returned non-UTF8 content-type header, forwarding response anyway"
+                    "Upstream returned non-UTF8 content-type header, forwarding response anyway"
                 ),
                 _ => {}
             }
         }
 
-        // Convert reqwest::Response to axum Response
         let axum_status = StatusCode::from_u16(status.as_u16())?;
         let mut axum_response = Response::builder().status(axum_status);
 
-        // Copy headers - convert from reqwest to axum
         let mut has_gzip_encoding = false;
         for (key, value) in response.headers() {
             let key_str = key.as_str();
@@ -430,19 +217,16 @@ impl Router {
                     | "trailers"
             );
 
-            // Check for content-encoding: gzip
             if key_str.eq_ignore_ascii_case("content-encoding") {
                 if let Ok(val_str) = value.to_str() {
                     if val_str.eq_ignore_ascii_case("gzip") {
                         has_gzip_encoding = true;
                         tracing::debug!("Response is gzip-encoded, will decompress");
-                        // Skip forwarding content-encoding header since we'll decompress
                         continue;
                     }
                 }
             }
 
-            // Skip hop-by-hop headers and let hyper set the correct length for the body we forward.
             if is_hop_by_hop || key_str.eq_ignore_ascii_case("content-length") {
                 tracing::debug!("Skipping header: {}", key_str);
                 continue;
@@ -454,11 +238,9 @@ impl Router {
             }
         }
 
-        // Stream the response body directly without buffering
         let stream = response.bytes_stream().map_err(std::io::Error::other);
 
         let body = if has_gzip_encoding {
-            // Decompress gzipped response
             tracing::debug!("Decompressing gzipped response");
             let reader = StreamReader::new(stream);
             let decoder = GzipDecoder::new(reader);
@@ -466,9 +248,7 @@ impl Router {
                 tokio_util::io::ReaderStream::new(decoder).map_err(std::io::Error::other);
             Body::from_stream(decompressed_stream)
         } else {
-            // Pass through uncompressed
             Body::from_stream(stream.inspect_ok(|chunk| {
-                // Debug: log first few bytes of each chunk
                 if !chunk.is_empty() {
                     let preview = &chunk[..chunk.len().min(50)];
                     match std::str::from_utf8(preview) {
@@ -483,35 +263,6 @@ impl Router {
         };
 
         axum_response.body(body).context("Failed to build response")
-    }
-
-    /// Forward a request directly using a model_mapping entry (no affinity/failover).
-    async fn try_mapped_provider(
-        &self,
-        cfg: &PlatformConfig,
-        endpoint: &str,
-        body: &Bytes,
-        headers: &HeaderMap,
-    ) -> Result<Response<Body>> {
-        let provider = ResolvedProvider {
-            kind: String::new(),
-            api_url: cfg.api_url.clone(),
-            api_key: cfg.api_key.clone(),
-            name: None,
-            level: 0,
-        };
-        self.try_provider(&provider, endpoint, body, headers).await
-    }
-
-    /// Extract user ID from Authorization header (hash of API key)
-    fn extract_user_id(&self, headers: &HeaderMap) -> String {
-        if let Some(auth) = headers.get("authorization") {
-            if let Ok(auth_str) = auth.to_str() {
-                let token = auth_str.strip_prefix("Bearer ").unwrap_or(auth_str).trim();
-                return hash_string(token);
-            }
-        }
-        "anonymous".to_string()
     }
 }
 

@@ -1,5 +1,5 @@
 [package]
-name = "cc-proxy"
+name = "cc-mapping"
 version = "0.1.2"
 edition = "2021"
 
@@ -25,5 +25,5 @@ async-compression = { version = "0.4", features = ["gzip", "tokio"] }
 tokio-util = { version = "0.7", features = ["io"] }
 
 [[bin]]
-name = "cc-proxy"
+name = "cc-mapping"
 path = "src/main.rs"

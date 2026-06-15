@@ -126,7 +126,7 @@ pub async fn run_server(router: Arc<Router>, bind_addr: &str) -> anyhow::Result<
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", bind_addr, e))?;
 
-    tracing::info!("🚀 cc-proxy listening on {}", bind_addr);
+    tracing::info!("🚀 cc-mapping listening on {}", bind_addr);
     tracing::info!("   POST /v1/messages (Claude Code)");
     tracing::info!("   POST /responses (Codex)");
 

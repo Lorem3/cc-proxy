@@ -18,7 +18,7 @@ pub struct PlatformConfig {
 /// Get configuration file path
 pub fn get_config_path() -> Result<PathBuf> {
     let home = std::env::var("HOME").context("HOME environment variable not set")?;
-    let dir = PathBuf::from(home).join(".cc-proxy");
+    let dir = PathBuf::from(home).join(".cc-mapping");
 
     let new_path = dir.join("provider.json");
     let legacy_path = dir.join("providers.json");

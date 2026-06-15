@@ -1,4 +1,4 @@
-# cc-proxy
+# cc-mapping
 
 Language | 语言: [English](#english) · [中文](#中文)
 
@@ -6,7 +6,7 @@ Language | 语言: [English](#english) · [中文](#中文)
 
 **A lightweight HTTP proxy for Claude Code and Codex CLIs.**
 
-`cc-proxy` sits between your AI CLI tools and upstream APIs. It routes each request by the `model` field in the request body, forwarding to the matching `apiUrl` with the configured `apiKey`.
+`cc-mapping` sits between your AI CLI tools and upstream APIs. It routes each request by the `model` field in the request body, forwarding to the matching `apiUrl` with the configured `apiKey`.
 
 ## Key Features
 
@@ -21,31 +21,31 @@ Language | 语言: [English](#english) · [中文](#中文)
 
 ### Pre-built Binaries (Recommended)
 
-Download the latest release for your platform from the [Releases](https://github.com/Lorem3/cc-proxy/releases) page.
+Download the latest release for your platform from the [Releases](https://github.com/Lorem3/cc-mapping/releases) page.
 
 ```bash
 # Linux x86_64
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-unknown-linux-gnu.tar.gz
-tar xzf cc-proxy-x86_64-unknown-linux-gnu.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cc-mapping-x86_64-unknown-linux-gnu.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # Linux arm64
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-unknown-linux-gnu.tar.gz
-tar xzf cc-proxy-aarch64-unknown-linux-gnu.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-aarch64-unknown-linux-gnu.tar.gz
+tar xzf cc-mapping-aarch64-unknown-linux-gnu.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # macOS arm64 (Apple Silicon)
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-apple-darwin.tar.gz
-tar xzf cc-proxy-aarch64-apple-darwin.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-aarch64-apple-darwin.tar.gz
+tar xzf cc-mapping-aarch64-apple-darwin.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # macOS x86_64 (Intel)
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-apple-darwin.tar.gz
-tar xzf cc-proxy-x86_64-apple-darwin.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-x86_64-apple-darwin.tar.gz
+tar xzf cc-mapping-x86_64-apple-darwin.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 ```
 
-Windows users can download `cc-proxy-x86_64-pc-windows-msvc.zip` from the Releases page and place `cc-proxy.exe` in a directory on your `PATH`.
+Windows users can download `cc-mapping-x86_64-pc-windows-msvc.zip` from the Releases page and place `cc-mapping.exe` in a directory on your `PATH`.
 
 ### Prerequisites
 
@@ -55,14 +55,14 @@ Windows users can download `cc-proxy-x86_64-pc-windows-msvc.zip` from the Releas
 
 ```bash
 # Clone the repository
-git clone https://github.com/arhsis/cc-proxy.git
-cd cc-proxy
+git clone https://github.com/arhsis/cc-mapping.git
+cd cc-mapping
 
 # Build release binary
 cargo build --release
 
 # Install globally
-sudo cp target/release/cc-proxy /usr/local/bin/
+sudo cp target/release/cc-mapping /usr/local/bin/
 ```
 
 ### Publishing a New Release
@@ -85,22 +85,22 @@ GitHub Actions will automatically build binaries for all five platforms and publ
 ```bash
 # Start the proxy (daemon mode)
 # This automatically configures Claude & Codex to use the proxy.
-cc-proxy start
+cc-mapping start
 
 # Check connection status and current routing
-cc-proxy status
+cc-mapping status
 
 # Stop the proxy and revert CLI configurations
-cc-proxy stop
+cc-mapping stop
 ```
 
-`cc-proxy` listens on `0.0.0.0:18100` by default and automatically detects your LAN IP.
+`cc-mapping` listens on `0.0.0.0:18100` by default and automatically detects your LAN IP.
 Share the reported URL (for example `http://192.168.1.252:18100`) with other machines
 so their CLIs can reuse the same proxy and model_mapping configuration.
 
 ### Machine B (remote CLI) example
 
-When **Machine A** runs `cc-proxy start` and shows `Share this URL: http://192.168.0.10:18100`,
+When **Machine A** runs `cc-mapping start` and shows `Share this URL: http://192.168.0.10:18100`,
 you can point **Machine B**'s CLI tools to that proxy without running another daemon.
 Create these minimal config files on Machine B (replace the IP with the one reported by Machine A):
 
@@ -109,7 +109,7 @@ Create these minimal config files on Machine B (replace the IP with the one repo
 ```json
 {
   "env": {
-    "ANTHROPIC_AUTH_TOKEN": "cc-proxy",
+    "ANTHROPIC_AUTH_TOKEN": "cc-mapping",
     "ANTHROPIC_BASE_URL": "http://192.168.0.10:18100"
   }
 }
@@ -120,10 +120,10 @@ Create these minimal config files on Machine B (replace the IP with the one repo
 ```toml
 preferred_auth_method = "apikey"
 model = "gpt-5-codex"
-model_provider = "cc-proxy"
+model_provider = "cc-mapping"
 
-[model_providers.cc-proxy]
-name = "cc-proxy"
+[model_providers.cc-mapping]
+name = "cc-mapping"
 base_url = "http://192.168.0.10:18100"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -134,13 +134,13 @@ requires_openai_auth = false
 
 ```json
 {
-  "OPENAI_API_KEY": "cc-proxy"
+  "OPENAI_API_KEY": "cc-mapping"
 }
 ```
 
 ### Configuration
 
-Create your configuration file at `~/.cc-proxy/provider.json`.
+Create your configuration file at `~/.cc-mapping/provider.json`.
 
 #### Model Mapping
 
@@ -175,7 +175,7 @@ Optionally set `name` to replace the entire `model` field in the request body be
 
 **为 Claude Code 与 Codex CLI 提供的轻量 HTTP 代理。**
 
-`cc-proxy` 位于本地 CLI 与上游 API 之间，根据请求体中的 `model` 字段，通过 `model_mapping` 将请求转发到对应的 `apiUrl`，并注入配置的 `apiKey`。
+`cc-mapping` 位于本地 CLI 与上游 API 之间，根据请求体中的 `model` 字段，通过 `model_mapping` 将请求转发到对应的 `apiUrl`，并注入配置的 `apiKey`。
 
 ### 核心特性
 
@@ -190,31 +190,31 @@ Optionally set `name` to replace the entire `model` field in the request body be
 
 #### 预编译二进制（推荐）
 
-从 [Releases](https://github.com/Lorem3/cc-proxy/releases) 页面下载适合你平台的最新版本。
+从 [Releases](https://github.com/Lorem3/cc-mapping/releases) 页面下载适合你平台的最新版本。
 
 ```bash
 # Linux x86_64
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-unknown-linux-gnu.tar.gz
-tar xzf cc-proxy-x86_64-unknown-linux-gnu.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-x86_64-unknown-linux-gnu.tar.gz
+tar xzf cc-mapping-x86_64-unknown-linux-gnu.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # Linux arm64
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-unknown-linux-gnu.tar.gz
-tar xzf cc-proxy-aarch64-unknown-linux-gnu.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-aarch64-unknown-linux-gnu.tar.gz
+tar xzf cc-mapping-aarch64-unknown-linux-gnu.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # macOS arm64（Apple Silicon）
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-aarch64-apple-darwin.tar.gz
-tar xzf cc-proxy-aarch64-apple-darwin.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-aarch64-apple-darwin.tar.gz
+tar xzf cc-mapping-aarch64-apple-darwin.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 
 # macOS x86_64（Intel）
-curl -LO https://github.com/Lorem3/cc-proxy/releases/latest/download/cc-proxy-x86_64-apple-darwin.tar.gz
-tar xzf cc-proxy-x86_64-apple-darwin.tar.gz
-sudo mv cc-proxy /usr/local/bin/
+curl -LO https://github.com/Lorem3/cc-mapping/releases/latest/download/cc-mapping-x86_64-apple-darwin.tar.gz
+tar xzf cc-mapping-x86_64-apple-darwin.tar.gz
+sudo mv cc-mapping /usr/local/bin/
 ```
 
-Windows 用户可从 Releases 页面下载 `cc-proxy-x86_64-pc-windows-msvc.zip`，解压后将 `cc-proxy.exe` 放入 `PATH` 目录即可。
+Windows 用户可从 Releases 页面下载 `cc-mapping-x86_64-pc-windows-msvc.zip`，解压后将 `cc-mapping.exe` 放入 `PATH` 目录即可。
 
 #### 先决条件
 
@@ -224,14 +224,14 @@ Windows 用户可从 Releases 页面下载 `cc-proxy-x86_64-pc-windows-msvc.zip`
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/cc-proxy.git
-cd cc-proxy
+git clone https://github.com/yourusername/cc-mapping.git
+cd cc-mapping
 
 # 构建发布版本
 cargo build --release
 
 # 全局安装
-sudo cp target/release/cc-proxy /usr/local/bin/
+sudo cp target/release/cc-mapping /usr/local/bin/
 ```
 
 #### 发布新版本
@@ -253,13 +253,13 @@ GitHub Actions 将自动为全部五个平台构建二进制并发布 GitHub Rel
 
 ```bash
 # 启动代理（守护模式），自动配置 Claude & Codex 代理
-cc-proxy start
+cc-mapping start
 
 # 查看连接状态与当前路由
-cc-proxy status
+cc-mapping status
 
 # 停止代理并恢复 CLI 配置
-cc-proxy stop
+cc-mapping stop
 ```
 
 默认会监听 `0.0.0.0:18100` 并自动检测本机可访问的 IP。
@@ -267,7 +267,7 @@ cc-proxy stop
 
 ### 机器 B（远程 CLI）示例
 
-当 **机器 A** 执行 `cc-proxy start` 并输出 `Share this URL: http://192.168.0.10:18100` 时，
+当 **机器 A** 执行 `cc-mapping start` 并输出 `Share this URL: http://192.168.0.10:18100` 时，
 **机器 B** 可以直接将各 CLI 指向该地址，无需再额外运行代理进程。
 在机器 B 上创建以下最小配置文件（记得将 IP 替换为机器 A 实际输出的地址）：
 
@@ -276,7 +276,7 @@ cc-proxy stop
 ```json
 {
   "env": {
-    "ANTHROPIC_AUTH_TOKEN": "cc-proxy",
+    "ANTHROPIC_AUTH_TOKEN": "cc-mapping",
     "ANTHROPIC_BASE_URL": "http://192.168.0.10:18100"
   }
 }
@@ -287,10 +287,10 @@ cc-proxy stop
 ```toml
 preferred_auth_method = "apikey"
 model = "gpt-5-codex"
-model_provider = "cc-proxy"
+model_provider = "cc-mapping"
 
-[model_providers.cc-proxy]
-name = "cc-proxy"
+[model_providers.cc-mapping]
+name = "cc-mapping"
 base_url = "http://192.168.0.10:18100"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -301,13 +301,13 @@ requires_openai_auth = false
 
 ```json
 {
-  "OPENAI_API_KEY": "cc-proxy"
+  "OPENAI_API_KEY": "cc-mapping"
 }
 ```
 
 #### 配置
 
-在 `~/.cc-proxy/provider.json` 创建配置文件。
+在 `~/.cc-mapping/provider.json` 创建配置文件。
 
 ##### 按模型路由（model_mapping）
 

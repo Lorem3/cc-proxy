@@ -28,7 +28,7 @@ pub fn configure_claude(proxy_addr: &str) -> Result<()> {
 
     env_map.insert(
         "ANTHROPIC_AUTH_TOKEN".into(),
-        JsonValue::String("cc-proxy".into()),
+        JsonValue::String("cc-mapping".into()),
     );
     env_map.insert(
         "ANTHROPIC_BASE_URL".into(),
@@ -64,7 +64,7 @@ pub fn configure_codex(proxy_addr: &str) -> Result<()> {
     config_table.insert("model".into(), toml::Value::String("gpt-5-codex".into()));
     config_table.insert(
         "model_provider".into(),
-        toml::Value::String("cc-proxy".into()),
+        toml::Value::String("cc-mapping".into()),
     );
 
     let providers_table = config_table
@@ -75,12 +75,12 @@ pub fn configure_codex(proxy_addr: &str) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("model_providers is not a table"))?;
 
     let cc_provider = providers_table
-        .entry(String::from("cc-proxy"))
+        .entry(String::from("cc-mapping"))
         .or_insert_with(|| toml::Value::Table(TomlTable::new()));
     let cc_provider = cc_provider
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("model_providers.cc-proxy is not a table"))?;
-    cc_provider.insert("name".into(), toml::Value::String("cc-proxy".into()));
+        .ok_or_else(|| anyhow::anyhow!("model_providers.cc-mapping is not a table"))?;
+    cc_provider.insert("name".into(), toml::Value::String("cc-mapping".into()));
     cc_provider.insert(
         "base_url".into(),
         toml::Value::String(format!("http://{}", proxy_addr)),
@@ -101,7 +101,7 @@ pub fn configure_codex(proxy_addr: &str) -> Result<()> {
     let mut auth = load_json_object(&auth_path, "Codex auth.json")?;
     auth.insert(
         "OPENAI_API_KEY".into(),
-        JsonValue::String("cc-proxy".into()),
+        JsonValue::String("cc-mapping".into()),
     );
     fs::write(
         &auth_path,

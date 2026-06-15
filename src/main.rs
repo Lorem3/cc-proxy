@@ -39,8 +39,8 @@ async fn main() -> Result<()> {
             Ok(())
         }
         _ => {
-            println!("Usage: cc-proxy [start|stop|status|reload|help]");
-            println!("Run 'cc-proxy help' for more information");
+            println!("Usage: cc-mapping [start|stop|status|reload|help]");
+            println!("Run 'cc-mapping help' for more information");
             Ok(())
         }
     }
@@ -49,12 +49,12 @@ async fn main() -> Result<()> {
 async fn start_daemon() -> Result<()> {
     // Check if already running
     if is_running() {
-        println!("❌ cc-proxy is already running");
-        println!("   Run 'cc-proxy stop' to stop it first");
+        println!("❌ cc-mapping is already running");
+        println!("   Run 'cc-mapping stop' to stop it first");
         process::exit(1);
     }
 
-    println!("🚀 Starting cc-proxy...");
+    println!("🚀 Starting cc-mapping...");
     println!();
 
     // Write PID file
@@ -101,13 +101,13 @@ async fn start_daemon() -> Result<()> {
     }
 
     // Start server
-    println!("✨ cc-proxy is running!");
+    println!("✨ cc-mapping is running!");
     println!("   Listening on:   http://{}", DEFAULT_BIND_ADDR);
     println!("   Share this URL: http://{}", advertise_addr);
     println!("   Claude Code: POST /v1/messages");
     println!("   Codex:       POST /responses");
     println!();
-    println!("💡 Tip: Edit ~/.cc-proxy/provider.json to configure model_mapping");
+    println!("💡 Tip: Edit ~/.cc-mapping/provider.json to configure model_mapping");
     println!();
 
     // Run server (blocks until shutdown)
@@ -182,13 +182,13 @@ fn start_config_watcher(router: Arc<Router>) -> Result<()> {
 
 fn stop_daemon() -> Result<()> {
     if !is_running() {
-        println!("cc-proxy is not running");
+        println!("cc-mapping is not running");
         return Ok(());
     }
 
     let pid = read_pid_file()?;
 
-    println!("Stopping cc-proxy (PID: {})...", pid);
+    println!("Stopping cc-mapping (PID: {})...", pid);
 
     // Send SIGTERM
     #[cfg(unix)]
@@ -201,14 +201,14 @@ fn stop_daemon() -> Result<()> {
     }
 
     remove_pid_file()?;
-    println!("✓ cc-proxy stopped");
+    println!("✓ cc-mapping stopped");
 
     Ok(())
 }
 
 fn reload_daemon() -> Result<()> {
     if !is_running() {
-        println!("cc-proxy is not running");
+        println!("cc-mapping is not running");
         return Ok(());
     }
 
@@ -260,10 +260,10 @@ fn show_status() -> Result<()> {
 }
 
 fn print_help() {
-    println!("cc-proxy - HTTP Proxy for Claude Code & Codex");
+    println!("cc-mapping - HTTP Proxy for Claude Code & Codex");
     println!();
     println!("USAGE:");
-    println!("    cc-proxy [COMMAND]");
+    println!("    cc-mapping [COMMAND]");
     println!();
     println!("COMMANDS:");
     println!("    start     Start the proxy daemon");
@@ -273,7 +273,7 @@ fn print_help() {
     println!("    help      Show this help message");
     println!();
     println!("DESCRIPTION:");
-    println!("    cc-proxy is an HTTP proxy that routes Claude Code and Codex");
+    println!("    cc-mapping is an HTTP proxy that routes Claude Code and Codex");
     println!("    requests by model via model_mapping, forwarding each model to");
     println!("    its configured upstream URL and API key.");
     println!();
@@ -283,22 +283,22 @@ fn print_help() {
     println!("    • Auto-configuration (sets up Claude Code & Codex)");
     println!();
     println!("CONFIGURATION:");
-    println!("    ~/.cc-proxy/provider.json");
+    println!("    ~/.cc-mapping/provider.json");
     println!();
     println!("EXAMPLES:");
     println!("    # Start the proxy");
-    println!("    cc-proxy start");
+    println!("    cc-mapping start");
     println!();
     println!("    # Check if running");
-    println!("    cc-proxy status");
+    println!("    cc-mapping status");
     println!();
     println!("    # Stop the proxy");
-    println!("    cc-proxy stop");
+    println!("    cc-mapping stop");
     println!();
     println!("    # Reload configuration");
-    println!("    cc-proxy reload");
+    println!("    cc-mapping reload");
     println!();
-    println!("For more information: https://github.com/yourusername/cc-proxy");
+    println!("For more information: https://github.com/yourusername/cc-mapping");
 }
 
 fn detect_advertise_addr(bind_addr: &str) -> String {
@@ -382,9 +382,9 @@ fn is_usable_ip(ip: &IpAddr) -> bool {
 // Helper functions for PID file management
 fn get_pid_file_path() -> Result<PathBuf> {
     let home = env::var("HOME")?;
-    let pid_dir = PathBuf::from(home).join(".cc-proxy");
+    let pid_dir = PathBuf::from(home).join(".cc-mapping");
     fs::create_dir_all(&pid_dir)?;
-    Ok(pid_dir.join("cc-proxy.pid"))
+    Ok(pid_dir.join("cc-mapping.pid"))
 }
 
 fn write_pid_file(pid: u32) -> Result<()> {

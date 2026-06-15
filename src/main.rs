@@ -33,12 +33,13 @@ async fn main() -> Result<()> {
         Some("start") => start_daemon().await,
         Some("stop") => stop_daemon(),
         Some("status") => show_status(),
+        Some("reload") => reload_daemon(),
         Some("help") | Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
         _ => {
-            println!("Usage: cc-proxy [start|stop|status|help]");
+            println!("Usage: cc-proxy [start|stop|status|reload|help]");
             println!("Run 'cc-proxy help' for more information");
             Ok(())
         }
@@ -83,6 +84,21 @@ async fn start_daemon() -> Result<()> {
 
     // Start config file watcher
     start_config_watcher(router.clone())?;
+
+    #[cfg(unix)]
+    {
+        let router_for_signal = router.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sig = signal(SignalKind::user_defined1()).expect("register SIGUSR1");
+            while sig.recv().await.is_some() {
+                tracing::info!("Received SIGUSR1, reloading config");
+                if let Err(e) = router_for_signal.reload_config().await {
+                    tracing::error!("Failed to reload config: {}", e);
+                }
+            }
+        });
+    }
 
     // Start server
     println!("✨ cc-proxy is running!");
@@ -190,6 +206,41 @@ fn stop_daemon() -> Result<()> {
     Ok(())
 }
 
+fn reload_daemon() -> Result<()> {
+    if !is_running() {
+        println!("cc-proxy is not running");
+        return Ok(());
+    }
+
+    let mapping = provider::load_model_mapping()?;
+    let pid = read_pid_file()?;
+
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        let output = Command::new("kill")
+            .arg("-USR1")
+            .arg(pid.to_string())
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!("Failed to send reload signal to PID {}", pid);
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        println!("reload is not supported on this platform");
+        return Ok(());
+    }
+
+    println!(
+        "✓ Configuration reload triggered (PID: {}, {} mapping(s))",
+        pid,
+        mapping.len()
+    );
+    Ok(())
+}
+
 fn show_status() -> Result<()> {
     if !is_running() {
         println!("Status: ❌ Not running");
@@ -218,6 +269,7 @@ fn print_help() {
     println!("    start     Start the proxy daemon");
     println!("    stop      Stop the proxy daemon");
     println!("    status    Show proxy status");
+    println!("    reload    Reload provider.json configuration");
     println!("    help      Show this help message");
     println!();
     println!("DESCRIPTION:");
@@ -242,6 +294,9 @@ fn print_help() {
     println!();
     println!("    # Stop the proxy");
     println!("    cc-proxy stop");
+    println!();
+    println!("    # Reload configuration");
+    println!("    cc-proxy reload");
     println!();
     println!("For more information: https://github.com/yourusername/cc-proxy");
 }

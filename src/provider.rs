@@ -165,7 +165,8 @@ mod tests {
         assert_eq!(alias_cfg.api_key, "sk-alias-key");
         assert_eq!(alias_cfg.name.as_deref(), Some("alias-model"));
 
-        let resolved = resolve_mapping_alias(&cfg.model_mapping, "AAA", &mut HashSet::new()).unwrap();
+        let resolved =
+            resolve_mapping_alias(&cfg.model_mapping, "AAA", &mut HashSet::new()).unwrap();
         assert_eq!(resolved.api_url, "https://api.alias.com/v1");
     }
 

@@ -148,14 +148,20 @@ Use `model_mapping` to route each model to a different upstream. When the reques
 
 Optionally set `name` to replace the entire `model` field in the request body before forwarding.
 
+`model_mapping` supports two value formats:
+
+- Direct object: points to `apiUrl`/`apiKey` (and optional `name`) directly.
+- String alias: points to another key in the same `model_mapping`, then uses that entry's object as the final upstream config.
+
 ```json
 {
   "model_mapping": {
-    "deepseek-v3": {
+    "AAA": {
       "apiUrl": "https://api.deepseek.com/v1",
       "apiKey": "sk-ds-key",
       "name": "deepseek-v4-pro"
     },
+    "deepseek-v3": "AAA",
     "mimo-v2.5-pro": { "apiUrl": "https://api.xiaomimimo.com/anthropic", "apiKey": "sk-mimo-key" },
     "sonnet":        { "apiUrl": "https://api.anthropic.com",            "apiKey": "sk-ant-sonnet-key" }
   }
@@ -167,6 +173,7 @@ Optionally set `name` to replace the entire `model` field in the request body be
 - Match is case-insensitive substring: `"sonnet"` matches `claude-sonnet-4-5`, `claude-sonnet-3-7`, etc.
 - More specific (longer) keys win: `"mimo-v2.5-pro"` matches before `"mimo-v2.5"`.
 - If `name` is set, the request body's `model` field is replaced entirely before forwarding.
+- If an alias value (e.g. `"AAA"`) is missing in `model_mapping`, that mapping entry is skipped (fallback behavior).
 - If no key matches the model, the request fails with an error.
 
 -----
@@ -315,14 +322,20 @@ requires_openai_auth = false
 
 可选配置 `name`，在转发前将请求体中的 `model` 整字段替换为指定值。
 
+`model_mapping` 支持两种 value 写法：
+
+- 直接对象：直接提供 `apiUrl`/`apiKey`（可选 `name`）。
+- 字符串别名：指向同一 `model_mapping` 中的另一个 key，再由该对象作为最终上游配置。
+
 ```json
 {
   "model_mapping": {
-    "deepseek-v3": {
+    "AAA": {
       "apiUrl": "https://api.deepseek.com/v1",
       "apiKey": "sk-ds-key",
       "name": "deepseek-v4-pro"
     },
+    "deepseek-v3": "AAA",
     "mimo-v2.5-pro": { "apiUrl": "https://api.xiaomimimo.com/anthropic", "apiKey": "sk-mimo-key" },
     "sonnet":        { "apiUrl": "https://api.anthropic.com",            "apiKey": "sk-ant-sonnet-key" }
   }
@@ -334,6 +347,7 @@ requires_openai_auth = false
 - 大小写不敏感子串匹配：`"sonnet"` 可命中 `claude-sonnet-4-5`、`claude-sonnet-3-7` 等。
 - 更长的 key 优先：`"mimo-v2.5-pro"` 早于 `"mimo-v2.5"` 匹配。
 - 配置了 `name` 时，转发前将请求体 `model` 整字段替换为 `name`。
+- 若 value 为别名（如 `"AAA"`）但 `model_mapping` 中不存在该 key，则该映射项会被跳过（回退行为）。
 - 若无匹配 key，请求返回错误。
 
 -----

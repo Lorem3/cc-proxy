@@ -11,7 +11,7 @@ use std::env;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::process;
+use std::process::{self, Command};
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -34,12 +34,13 @@ async fn main() -> Result<()> {
         Some("stop") => stop_daemon(),
         Some("status") => show_status(),
         Some("reload") => reload_daemon(),
+        Some("config") => open_config_file(),
         Some("help") | Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
         _ => {
-            println!("Usage: cc-mapping [start|stop|status|reload|help]");
+            println!("Usage: cc-mapping [start|stop|status|reload|config|help]");
             println!("Run 'cc-mapping help' for more information");
             Ok(())
         }
@@ -259,6 +260,49 @@ fn show_status() -> Result<()> {
     Ok(())
 }
 
+fn open_config_file() -> Result<()> {
+    let config_path = provider::get_config_path()?;
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if !config_path.exists() {
+        fs::write(&config_path, "{\n  \"model_mapping\": {}\n}\n")?;
+    }
+
+    println!("Configuration file: {}", config_path.display());
+
+    let status = open_file_with_system_default(&config_path)?;
+    if !status.success() {
+        anyhow::bail!(
+            "Failed to open config file with system default application: {}",
+            config_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn open_file_with_system_default(path: &std::path::Path) -> Result<std::process::ExitStatus> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Command::new("open").arg(path).status()?)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Command::new("xdg-open").arg(path).status()?)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Ok(Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg("")
+            .arg(path)
+            .status()?)
+    }
+}
+
 fn print_help() {
     println!("cc-mapping - HTTP Proxy for Claude Code & Codex");
     println!();
@@ -270,6 +314,7 @@ fn print_help() {
     println!("    stop      Stop the proxy daemon");
     println!("    status    Show proxy status");
     println!("    reload    Reload provider.json configuration");
+    println!("    config    Print and open provider.json");
     println!("    help      Show this help message");
     println!();
     println!("DESCRIPTION:");
@@ -297,6 +342,9 @@ fn print_help() {
     println!();
     println!("    # Reload configuration");
     println!("    cc-mapping reload");
+    println!();
+    println!("    # Print and open configuration file");
+    println!("    cc-mapping config");
     println!();
     println!("For more information: https://github.com/yourusername/cc-mapping");
 }

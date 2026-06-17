@@ -17,10 +17,20 @@ use tokio_util::io::StreamReader;
 pub struct Router {
     http_client: reqwest::Client,
     model_mapping: Arc<RwLock<HashMap<String, PlatformConfig>>>,
+    request_log: bool,
+}
+
+fn format_body_for_log(body: &Bytes) -> String {
+    if let Ok(json) = serde_json::from_slice::<Value>(body) {
+        serde_json::to_string_pretty(&json)
+            .unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned())
+    } else {
+        String::from_utf8_lossy(body).into_owned()
+    }
 }
 
 impl Router {
-    pub fn new(http_client: reqwest::Client) -> Result<Self> {
+    pub fn new(http_client: reqwest::Client, request_log: bool) -> Result<Self> {
         let mapping = match load_model_mapping() {
             Ok(m) => {
                 tracing::info!("Loaded {} model mapping(s)", m.len());
@@ -35,6 +45,7 @@ impl Router {
         Ok(Self {
             http_client,
             model_mapping: Arc::new(RwLock::new(mapping)),
+            request_log,
         })
     }
 
@@ -55,10 +66,12 @@ impl Router {
     pub async fn route_request(
         &self,
         kind: &str,
+        incoming_url: &str,
         endpoint: &str,
         body: Bytes,
         headers: HeaderMap,
     ) -> Result<Response<Body>> {
+        let original_body = body.clone();
         let request_json: Value =
             serde_json::from_slice(&body).context("Failed to parse request body as JSON")?;
 
@@ -101,19 +114,51 @@ impl Router {
             body
         };
 
-        self.forward_request(&cfg, endpoint, &forward_body, &headers)
-            .await
+        self.forward_request(
+            &cfg,
+            incoming_url,
+            endpoint,
+            &original_body,
+            &forward_body,
+            &headers,
+        )
+        .await
     }
 
     /// Forward request to the mapped upstream.
     async fn forward_request(
         &self,
         cfg: &PlatformConfig,
+        incoming_url: &str,
         endpoint: &str,
+        original_body: &Bytes,
         body: &Bytes,
         headers: &HeaderMap,
     ) -> Result<Response<Body>> {
         let url = format!("{}{}", cfg.api_url.trim_end_matches('/'), endpoint);
+
+        if self.request_log {
+            tracing::info!(
+                target: "cc_mapping::request",
+                incoming_url = %incoming_url,
+                "proxy request"
+            );
+            tracing::info!(
+                target: "cc_mapping::request",
+                upstream_url = %url,
+                "proxy request"
+            );
+            tracing::info!(
+                target: "cc_mapping::request",
+                body = %format_body_for_log(original_body),
+                "original body"
+            );
+            tracing::info!(
+                target: "cc_mapping::request",
+                body = %format_body_for_log(body),
+                "forward body"
+            );
+        }
 
         let mut req_headers = reqwest::header::HeaderMap::new();
         for (key, value) in headers {

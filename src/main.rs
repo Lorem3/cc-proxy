@@ -30,7 +30,10 @@ async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
     match args.get(1).map(|s| s.as_str()) {
-        Some("start") => start_daemon().await,
+        Some("start") => {
+            let request_log = args.iter().skip(2).any(|a| a == "-log");
+            start_daemon(request_log).await
+        }
         Some("stop") => stop_daemon(),
         Some("status") => show_status(),
         Some("reload") => reload_daemon(),
@@ -47,7 +50,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn start_daemon() -> Result<()> {
+async fn start_daemon(request_log: bool) -> Result<()> {
     // Check if already running
     if is_running() {
         println!("❌ cc-mapping is already running");
@@ -56,6 +59,9 @@ async fn start_daemon() -> Result<()> {
     }
 
     println!("🚀 Starting cc-mapping...");
+    if request_log {
+        println!("   Request logging enabled (-log)");
+    }
     println!();
 
     // Write PID file
@@ -81,7 +87,7 @@ async fn start_daemon() -> Result<()> {
         .build()?;
 
     // Initialize router
-    let router = Arc::new(Router::new(http_client)?);
+    let router = Arc::new(Router::new(http_client, request_log)?);
 
     // Start config file watcher
     start_config_watcher(router.clone())?;
@@ -311,6 +317,7 @@ fn print_help() {
     println!();
     println!("COMMANDS:");
     println!("    start     Start the proxy daemon");
+    println!("              Use -log to print incoming URL, upstream URL, and bodies");
     println!("    stop      Stop the proxy daemon");
     println!("    status    Show proxy status");
     println!("    reload    Reload provider.json configuration");
@@ -333,6 +340,9 @@ fn print_help() {
     println!("EXAMPLES:");
     println!("    # Start the proxy");
     println!("    cc-mapping start");
+    println!();
+    println!("    # Start with request logging");
+    println!("    cc-mapping start -log");
     println!();
     println!("    # Check if running");
     println!("    cc-mapping status");

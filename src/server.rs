@@ -2,7 +2,7 @@ use crate::router::{error_response, Router};
 use axum::{
     body::Body,
     extract::{Request, State},
-    http::{Response, StatusCode},
+    http::{HeaderMap, Response, StatusCode},
     routing::post,
     Router as AxumRouter,
 };
@@ -10,6 +10,14 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
 const MAX_BODY_BYTES: usize = 5 * 1024 * 1024; // ~5MB guard against oversized payloads
+
+fn format_incoming_url(headers: &HeaderMap, path_and_query: &str) -> String {
+    let host = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:18100");
+    format!("http://{}{}", host, path_and_query)
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -103,9 +111,10 @@ async fn handle_request(
     };
 
     // Route request
+    let incoming_url = format_incoming_url(&headers, endpoint);
     match state
         .router
-        .route_request(kind, endpoint, body, headers)
+        .route_request(kind, &incoming_url, endpoint, body, headers)
         .await
     {
         Ok(response) => Ok(response),

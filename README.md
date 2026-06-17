@@ -55,7 +55,7 @@ Windows users can download `cc-mapping-x86_64-pc-windows-msvc.zip` from the Rele
 
 ```bash
 # Clone the repository
-git clone https://github.com/arhsis/cc-mapping.git
+git clone https://github.com/Lorem3/cc-mapping.git
 cd cc-mapping
 
 # Build release binary
@@ -87,16 +87,40 @@ GitHub Actions will automatically build binaries for all five platforms and publ
 # This automatically configures Claude & Codex to use the proxy.
 cc-mapping start
 
+# Start with request logging (prints incoming URL, upstream URL, and bodies)
+cc-mapping start -log
+
 # Check connection status and current routing
 cc-mapping status
 
-# Stop the proxy and revert CLI configurations
+# Reload provider.json without restarting (sends SIGUSR1 to the daemon)
+cc-mapping reload
+
+# Print and open provider.json with the system default editor
+cc-mapping config
+
+# Stop the proxy
 cc-mapping stop
 ```
 
 `cc-mapping` listens on `0.0.0.0:18100` by default and automatically detects your LAN IP.
 Share the reported URL (for example `http://192.168.1.252:18100`) with other machines
 so their CLIs can reuse the same proxy and model_mapping configuration.
+
+### Hot-reload
+
+The daemon automatically watches `~/.cc-mapping/provider.json` for changes and reloads
+the `model_mapping` configuration on every save—no restart required. You can also
+trigger a manual reload at any time:
+
+```bash
+cc-mapping reload
+```
+
+### Sub-path routing
+
+The proxy forwards the full request path to the upstream, so sub-paths work automatically.
+For example, `POST /v1/messages/count_tokens` is routed the same way as `POST /v1/messages`.
 
 ### Machine B (remote CLI) example
 
@@ -175,6 +199,7 @@ Optionally set `name` to replace the entire `model` field in the request body be
 - If `name` is set, the request body's `model` field is replaced entirely before forwarding.
 - If an alias value (e.g. `"provider_deepseek"`) is missing in `model_mapping`, that mapping entry is skipped (fallback behavior).
 - If no key matches the model, the request fails with an error.
+- **Dashscope compatibility**: When `apiUrl` contains both `dashscope` and `anthropic`, the proxy automatically uses `x-api-key` header authentication and strips `anthropic-version`/`anthropic-beta` headers for compatibility with Dashscope's Anthropic-compatible API.
 
 -----
 
@@ -231,7 +256,7 @@ Windows 用户可从 Releases 页面下载 `cc-mapping-x86_64-pc-windows-msvc.zi
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/cc-mapping.git
+git clone https://github.com/Lorem3/cc-mapping.git
 cd cc-mapping
 
 # 构建发布版本
@@ -262,15 +287,36 @@ GitHub Actions 将自动为全部五个平台构建二进制并发布 GitHub Rel
 # 启动代理（守护模式），自动配置 Claude & Codex 代理
 cc-mapping start
 
+# 启动并开启请求日志（打印 incoming URL、upstream URL 和请求体）
+cc-mapping start -log
+
 # 查看连接状态与当前路由
 cc-mapping status
 
-# 停止代理并恢复 CLI 配置
+# 重新加载 provider.json（无需重启，向守护进程发送 SIGUSR1 信号）
+cc-mapping reload
+
+# 打印配置文件路径并用系统默认编辑器打开
+cc-mapping config
+
+# 停止代理
 cc-mapping stop
 ```
 
 默认会监听 `0.0.0.0:18100` 并自动检测本机可访问的 IP。
 将自动提示的地址（如 `http://192.168.1.252:18100`）分享给其他主机，即可让它们共用同一个代理与 model_mapping 配置。
+
+#### 热重载
+
+守护进程会自动监听 `~/.cc-mapping/provider.json` 的文件变更，每次保存后自动重载 `model_mapping` 配置，无需重启。也可以随时手动触发重载：
+
+```bash
+cc-mapping reload
+```
+
+#### 子路径路由
+
+代理会将完整的请求路径转发到上游，因此子路径自动生效。例如 `POST /v1/messages/count_tokens` 与 `POST /v1/messages` 使用相同的路由规则。
 
 ### 机器 B（远程 CLI）示例
 
@@ -349,6 +395,7 @@ requires_openai_auth = false
 - 配置了 `name` 时，转发前将请求体 `model` 整字段替换为 `name`。
 - 若 value 为别名（如 `"provider_deepseek"`）但 `model_mapping` 中不存在该 key，则该映射项会被跳过（回退行为）。
 - 若无匹配 key，请求返回错误。
+- **Dashscope 兼容**：当 `apiUrl` 同时包含 `dashscope` 和 `anthropic` 时，代理自动使用 `x-api-key` 头认证，并剥离 `anthropic-version`/`anthropic-beta` 头以兼容 Dashscope 的 Anthropic 兼容 API。
 
 -----
 

@@ -12,6 +12,7 @@ Language | 语言: [English](#english) · [中文](#中文)
 
   * **Model-aware routing**: Route each model to a different upstream via `model_mapping`.
   * **Optional model rename**: Replace the request `model` field before forwarding (e.g. map `deepseek-v3` to `deepseek-v4-pro`).
+  * **URL shortcuts**: Define reusable URL aliases in `model_urls` for cleaner configuration.
   * **Auto-Configuration**: Automatically manages the proxy settings for Claude Code and Codex CLIs—no manual export needed.
   * **Lightweight**: A single Rust binary with no database or heavy dependencies.
 
@@ -87,7 +88,7 @@ GitHub Actions will automatically build binaries for all five platforms and publ
 # This automatically configures Claude & Codex to use the proxy.
 cc-mapping start
 
-# Start with request logging (prints incoming URL, upstream URL, and bodies)
+# Start with request logging (prints incoming URL and upstream URL)
 cc-mapping start -log
 
 # Check connection status and current routing
@@ -201,6 +202,32 @@ Optionally set `name` to replace the entire `model` field in the request body be
 - If no key matches the model, the request fails with an error.
 - **Dashscope compatibility**: When `apiUrl` contains both `dashscope` and `anthropic`, the proxy automatically uses `x-api-key` header authentication and strips `anthropic-version`/`anthropic-beta` headers for compatibility with Dashscope's Anthropic-compatible API.
 
+#### Model URLs (URL Shortcuts)
+
+Use `model_urls` to define reusable URL shortcuts. When `apiUrl` does not start with `http://` or `https://`, it is looked up in `model_urls` and replaced with the matching URL.
+
+```json
+{
+  "model_urls": {
+    "mimo": "https://api.xiaomimimo.com/anthropic",
+    "dashscope": "https://dashscope.aliyuncs.com/apps/anthropic"
+  },
+  "model_mapping": {
+    "mimo_A": {
+      "apiUrl": "mimo",
+      "apiKey": "sk-key-1",
+      "name": "mimo-v2.5"
+    },
+    "mimo_B": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-key-2"
+    }
+  }
+}
+```
+
+In this example, `mimo_A`'s `apiUrl` (`"mimo"`) is resolved to `"https://api.xiaomimimo.com/anthropic"` via `model_urls`, while `mimo_B`'s full URL is kept as-is.
+
 -----
 
 ## 中文
@@ -213,6 +240,7 @@ Optionally set `name` to replace the entire `model` field in the request body be
 
   * **按模型路由**：通过 `model_mapping` 将不同 model 转发到不同上游。
   * **可选 model 替换**：转发前可将请求体中的 `model` 整字段替换为配置的 `name`。
+  * **URL 快捷方式**：在 `model_urls` 中定义可复用的 URL 别名，简化配置。
   * **自动配置**：无需手动导出代理变量，自动配置 Claude Code 与 Codex CLI。
   * **轻量单可执行文件**：纯 Rust 实现，无数据库与重依赖。
 
@@ -287,7 +315,7 @@ GitHub Actions 将自动为全部五个平台构建二进制并发布 GitHub Rel
 # 启动代理（守护模式），自动配置 Claude & Codex 代理
 cc-mapping start
 
-# 启动并开启请求日志（打印 incoming URL、upstream URL 和请求体）
+# 启动并开启请求日志（打印 incoming URL 和 upstream URL）
 cc-mapping start -log
 
 # 查看连接状态与当前路由
@@ -396,6 +424,32 @@ requires_openai_auth = false
 - 若 value 为别名（如 `"provider_deepseek"`）但 `model_mapping` 中不存在该 key，则该映射项会被跳过（回退行为）。
 - 若无匹配 key，请求返回错误。
 - **Dashscope 兼容**：当 `apiUrl` 同时包含 `dashscope` 和 `anthropic` 时，代理自动使用 `x-api-key` 头认证，并剥离 `anthropic-version`/`anthropic-beta` 头以兼容 Dashscope 的 Anthropic 兼容 API。
+
+##### URL 快捷方式（model_urls）
+
+使用 `model_urls` 定义可复用的 URL 快捷方式。当 `apiUrl` 不以 `http://` 或 `https://` 开头时，会从 `model_urls` 中查找并替换为对应的 URL。
+
+```json
+{
+  "model_urls": {
+    "mimo": "https://api.xiaomimimo.com/anthropic",
+    "dashscope": "https://dashscope.aliyuncs.com/apps/anthropic"
+  },
+  "model_mapping": {
+    "mimo_A": {
+      "apiUrl": "mimo",
+      "apiKey": "sk-key-1",
+      "name": "mimo-v2.5"
+    },
+    "mimo_B": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-key-2"
+    }
+  }
+}
+```
+
+在此示例中，`mimo_A` 的 `apiUrl`（`"mimo"`）通过 `model_urls` 解析为 `"https://api.xiaomimimo.com/anthropic"`，而 `mimo_B` 的完整 URL 则保持不变。
 
 -----
 

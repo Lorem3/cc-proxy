@@ -326,7 +326,13 @@ mod tests {
             }
         }
 
-        assert_eq!(resolved.get("mimo_A").unwrap().api_url, "https://api.xiaomimimo.com/anthropic");
-        assert_eq!(resolved.get("mimo_B").unwrap().api_url, "https://api.deepseek.com/v1");
+        assert_eq!(
+            resolved.get("mimo_A").unwrap().api_url,
+            "https://api.xiaomimimo.com/anthropic"
+        );
+        assert_eq!(
+            resolved.get("mimo_B").unwrap().api_url,
+            "https://api.deepseek.com/v1"
+        );
     }
 }

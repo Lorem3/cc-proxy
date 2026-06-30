@@ -20,15 +20,6 @@ pub struct Router {
     request_log: bool,
 }
 
-fn format_body_for_log(body: &Bytes) -> String {
-    if let Ok(json) = serde_json::from_slice::<Value>(body) {
-        serde_json::to_string_pretty(&json)
-            .unwrap_or_else(|_| String::from_utf8_lossy(body).into_owned())
-    } else {
-        String::from_utf8_lossy(body).into_owned()
-    }
-}
-
 impl Router {
     pub fn new(http_client: reqwest::Client, request_log: bool) -> Result<Self> {
         let mapping = match load_model_mapping() {
@@ -141,22 +132,8 @@ impl Router {
             tracing::info!(
                 target: "cc_mapping::request",
                 incoming_url = %incoming_url,
-                "proxy request"
-            );
-            tracing::info!(
-                target: "cc_mapping::request",
                 upstream_url = %url,
                 "proxy request"
-            );
-            tracing::info!(
-                target: "cc_mapping::request",
-                body = %format_body_for_log(original_body),
-                "original body"
-            );
-            tracing::info!(
-                target: "cc_mapping::request",
-                body = %format_body_for_log(body),
-                "forward body"
             );
         }
 

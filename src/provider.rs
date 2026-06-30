@@ -33,6 +33,8 @@ pub fn get_config_path() -> Result<PathBuf> {
 #[derive(Debug, Deserialize, Default)]
 struct ModelMappingConfig {
     #[serde(default)]
+    model_urls: HashMap<String, String>,
+    #[serde(default)]
     model_mapping: HashMap<String, MappingEntry>,
 }
 
@@ -69,6 +71,7 @@ pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
     let content = fs::read_to_string(&config_path)
         .with_context(|| format!("Failed to read config: {:?}", config_path))?;
     let cfg: ModelMappingConfig = serde_json::from_str(&content).unwrap_or_default();
+    let model_urls = cfg.model_urls;
     let model_mapping = cfg.model_mapping;
     let mut resolved = HashMap::new();
 
@@ -89,6 +92,27 @@ pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
                         model_key
                     );
                 }
+            }
+        }
+    }
+
+    // Resolve short apiUrl values using model_urls
+    for (key, cfg) in resolved.iter_mut() {
+        if !cfg.api_url.starts_with("http://") && !cfg.api_url.starts_with("https://") {
+            if let Some(resolved_url) = model_urls.get(&cfg.api_url) {
+                tracing::debug!(
+                    "Resolved apiUrl '{}' → '{}' for key '{}' via model_urls",
+                    cfg.api_url,
+                    resolved_url,
+                    key
+                );
+                cfg.api_url = resolved_url.clone();
+            } else {
+                tracing::warn!(
+                    "apiUrl '{}' for key '{}' is not a full URL and not found in model_urls; skipping",
+                    cfg.api_url,
+                    key
+                );
             }
         }
     }
@@ -260,5 +284,49 @@ mod tests {
         let (_, cfg) = find_model_mapping(&mapping, "deepseek-v3-chat").unwrap();
         assert_eq!(cfg.api_url, "https://api.deepseek.com/v1");
         assert_eq!(cfg.name.as_deref(), Some("deepseek-v4-pro"));
+    }
+
+    #[test]
+    fn model_urls_resolves_short_api_url() {
+        let json = r#"
+        {
+            "model_urls": {
+                "mimo": "https://api.xiaomimimo.com/anthropic",
+                "dashscope": "https://dashscope.aliyuncs.com/apps/anthropic"
+            },
+            "model_mapping": {
+                "mimo_A": {
+                    "apiUrl": "mimo",
+                    "apiKey": "sk-key",
+                    "name": "mimo-v2.5"
+                },
+                "mimo_B": {
+                    "apiUrl": "https://api.deepseek.com/v1",
+                    "apiKey": "sk-ds"
+                }
+            }
+        }
+        "#;
+
+        let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
+        let model_urls = cfg.model_urls;
+        let mut resolved = HashMap::new();
+        for (model_key, entry) in &cfg.model_mapping {
+            if let MappingEntry::Direct(platform_cfg) = entry {
+                resolved.insert(model_key.clone(), platform_cfg.clone());
+            }
+        }
+
+        // Simulate resolution
+        for (key, cfg) in resolved.iter_mut() {
+            if !cfg.api_url.starts_with("http://") && !cfg.api_url.starts_with("https://") {
+                if let Some(resolved_url) = model_urls.get(&cfg.api_url) {
+                    cfg.api_url = resolved_url.clone();
+                }
+            }
+        }
+
+        assert_eq!(resolved.get("mimo_A").unwrap().api_url, "https://api.xiaomimimo.com/anthropic");
+        assert_eq!(resolved.get("mimo_B").unwrap().api_url, "https://api.deepseek.com/v1");
     }
 }

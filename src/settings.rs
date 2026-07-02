@@ -36,10 +36,7 @@ pub fn configure_claude(proxy_addr: &str) -> Result<()> {
         "ANTHROPIC_AUTH_TOKEN".into(),
         JsonValue::String(new_token.into()),
     );
-    env_map.insert(
-        "ANTHROPIC_BASE_URL".into(),
-        JsonValue::String(new_url),
-    );
+    env_map.insert("ANTHROPIC_BASE_URL".into(), JsonValue::String(new_url));
     settings.insert("env".into(), JsonValue::Object(env_map));
 
     // Write settings
@@ -127,19 +124,12 @@ pub fn configure_all(proxy_addr: &str) -> Result<()> {
     Ok(())
 }
 
-fn backup_if_changed(
-    env_map: &mut JsonMap<String, JsonValue>,
-    key: &str,
-    new_value: &str,
-) {
+fn backup_if_changed(env_map: &mut JsonMap<String, JsonValue>, key: &str, new_value: &str) {
     if let Some(existing) = env_map.get(key) {
         if let Some(existing_str) = existing.as_str() {
             if existing_str != new_value {
                 let backup_key = format!("{}_BAK", key);
-                env_map.insert(
-                    backup_key,
-                    JsonValue::String(existing_str.to_string()),
-                );
+                env_map.insert(backup_key, JsonValue::String(existing_str.to_string()));
             }
         }
     }

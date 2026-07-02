@@ -26,13 +26,19 @@ pub fn configure_claude(proxy_addr: &str) -> Result<()> {
         None => JsonMap::new(),
     };
 
+    let new_token = "cc-mapping";
+    let new_url = format!("http://{}", proxy_addr);
+
+    backup_if_changed(&mut env_map, "ANTHROPIC_AUTH_TOKEN", new_token);
+    backup_if_changed(&mut env_map, "ANTHROPIC_BASE_URL", &new_url);
+
     env_map.insert(
         "ANTHROPIC_AUTH_TOKEN".into(),
-        JsonValue::String("cc-mapping".into()),
+        JsonValue::String(new_token.into()),
     );
     env_map.insert(
         "ANTHROPIC_BASE_URL".into(),
-        JsonValue::String(format!("http://{}", proxy_addr)),
+        JsonValue::String(new_url),
     );
     settings.insert("env".into(), JsonValue::Object(env_map));
 
@@ -119,6 +125,24 @@ pub fn configure_all(proxy_addr: &str) -> Result<()> {
     configure_codex(proxy_addr)?;
     tracing::info!("✓ All CLI tools configured to use proxy at {}", proxy_addr);
     Ok(())
+}
+
+fn backup_if_changed(
+    env_map: &mut JsonMap<String, JsonValue>,
+    key: &str,
+    new_value: &str,
+) {
+    if let Some(existing) = env_map.get(key) {
+        if let Some(existing_str) = existing.as_str() {
+            if existing_str != new_value {
+                let backup_key = format!("{}_BAK", key);
+                env_map.insert(
+                    backup_key,
+                    JsonValue::String(existing_str.to_string()),
+                );
+            }
+        }
+    }
 }
 
 fn load_json_object(path: &Path, description: &str) -> Result<JsonMap<String, JsonValue>> {

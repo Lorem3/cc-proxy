@@ -370,16 +370,6 @@ fn detect_advertise_addr(bind_addr: &str) -> String {
         }
     }
 
-    if let Some(ip) = detect_lan_ip() {
-        let addr = format!("{}:{}", ip, port);
-        tracing::info!("Detected LAN address for CLI config: {}", addr);
-        return addr;
-    }
-
-    tracing::warn!(
-        "Falling back to 127.0.0.1:{} for CLI configuration; could not detect LAN IP",
-        port
-    );
     format!("127.0.0.1:{}", port)
 }
 

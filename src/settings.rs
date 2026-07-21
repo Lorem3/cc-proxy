@@ -22,8 +22,7 @@ fn is_valid_token_format(token: &str) -> bool {
         return false;
     }
     let hex_part = &token[TOKEN_PREFIX.len()..];
-    hex_part.len() == TOKEN_LENGTH * 2
-        && hex_part.chars().all(|c| c.is_ascii_hexdigit())
+    hex_part.len() == TOKEN_LENGTH * 2 && hex_part.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Load or create auth token, persisting it to ~/.cc-mapping/provider.json
@@ -36,13 +35,11 @@ pub fn load_or_create_token() -> Result<String> {
 
     // Load existing config or create empty object
     let mut config: JsonValue = if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
-            .context("Failed to read provider.json")?;
+        let content = fs::read_to_string(&config_path).context("Failed to read provider.json")?;
         if content.trim().is_empty() {
             JsonValue::Object(JsonMap::new())
         } else {
-            serde_json::from_str(&content)
-                .unwrap_or_else(|_| JsonValue::Object(JsonMap::new()))
+            serde_json::from_str(&content).unwrap_or_else(|_| JsonValue::Object(JsonMap::new()))
         }
     } else {
         JsonValue::Object(JsonMap::new())
@@ -61,11 +58,8 @@ pub fn load_or_create_token() -> Result<String> {
     let token = generate_token();
     config["proxy_token"] = JsonValue::String(token.clone());
 
-    fs::write(
-        &config_path,
-        serde_json::to_string_pretty(&config)?,
-    )
-    .context("Failed to write provider.json")?;
+    fs::write(&config_path, serde_json::to_string_pretty(&config)?)
+        .context("Failed to write provider.json")?;
 
     // Also write to claude settings
     let _ = ensure_claude_settings_token(&token)?;
@@ -204,10 +198,7 @@ pub fn configure_codex(proxy_addr: &str, token: &str) -> Result<()> {
     // Write auth.json
     let auth_path = codex_dir.join("auth.json");
     let mut auth = load_json_object(&auth_path, "Codex auth.json")?;
-    auth.insert(
-        "OPENAI_API_KEY".into(),
-        JsonValue::String(token.into()),
-    );
+    auth.insert("OPENAI_API_KEY".into(), JsonValue::String(token.into()));
     fs::write(
         &auth_path,
         serde_json::to_string_pretty(&JsonValue::Object(auth))?,

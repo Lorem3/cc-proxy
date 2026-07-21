@@ -118,8 +118,13 @@ async fn handle_request(
 
     // Verify authorization
     if !verify_auth(&headers, &state.auth_token) {
-        tracing::warn!("Unauthorized request from {}",
-            headers.get("host").and_then(|v| v.to_str().ok()).unwrap_or("unknown"));
+        tracing::warn!(
+            "Unauthorized request from {}",
+            headers
+                .get("host")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown")
+        );
         return Err(error_response(
             StatusCode::UNAUTHORIZED,
             "Invalid or missing authorization token",
@@ -156,7 +161,11 @@ async fn handle_request(
     }
 }
 
-pub async fn run_server(router: Arc<Router>, bind_addr: &str, auth_token: String) -> anyhow::Result<()> {
+pub async fn run_server(
+    router: Arc<Router>,
+    bind_addr: &str,
+    auth_token: String,
+) -> anyhow::Result<()> {
     let app = create_app(router, auth_token);
 
     let listener = tokio::net::TcpListener::bind(bind_addr)

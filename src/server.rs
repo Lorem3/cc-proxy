@@ -22,10 +22,14 @@ fn format_incoming_url(headers: &HeaderMap, path_and_query: &str) -> String {
 #[derive(Clone)]
 pub struct AppState {
     pub router: Arc<Router>,
+    pub auth_token: Arc<String>,
 }
 
-pub fn create_app(router: Arc<Router>) -> AxumRouter {
-    let state = AppState { router };
+pub fn create_app(router: Arc<Router>, auth_token: String) -> AxumRouter {
+    let state = AppState {
+        router,
+        auth_token: Arc::new(auth_token),
+    };
 
     AxumRouter::new()
         // Exact paths for common endpoints; sub-paths are handled by fallback.
@@ -88,6 +92,20 @@ async fn handle_fallback(
     }
 }
 
+/// Verify the Authorization header matches the proxy token
+fn verify_auth(headers: &HeaderMap, expected_token: &str) -> bool {
+    headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|auth_str| {
+            auth_str
+                .strip_prefix("Bearer ")
+                .map(|token| token == expected_token)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
 /// Generic request handler
 async fn handle_request(
     state: AppState,
@@ -97,6 +115,16 @@ async fn handle_request(
 ) -> Result<Response<Body>, Response<Body>> {
     // Extract headers
     let headers = request.headers().clone();
+
+    // Verify authorization
+    if !verify_auth(&headers, &state.auth_token) {
+        tracing::warn!("Unauthorized request from {}",
+            headers.get("host").and_then(|v| v.to_str().ok()).unwrap_or("unknown"));
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "Invalid or missing authorization token",
+        ));
+    }
 
     // Read body
     let body = match axum::body::to_bytes(request.into_body(), MAX_BODY_BYTES).await {
@@ -128,8 +156,8 @@ async fn handle_request(
     }
 }
 
-pub async fn run_server(router: Arc<Router>, bind_addr: &str) -> anyhow::Result<()> {
-    let app = create_app(router);
+pub async fn run_server(router: Arc<Router>, bind_addr: &str, auth_token: String) -> anyhow::Result<()> {
+    let app = create_app(router, auth_token);
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await

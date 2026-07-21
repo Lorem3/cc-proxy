@@ -1,11 +1,114 @@
 use anyhow::{Context, Result};
+use rand::Rng;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml::value::Table as TomlTable;
 
+const TOKEN_LENGTH: usize = 12;
+const TOKEN_PREFIX: &str = "TCCMP";
+
+/// Generate a random token in format "TCCMP" + 12 hex characters
+fn generate_token() -> String {
+    let mut rng = rand::thread_rng();
+    let random_bytes: Vec<u8> = (0..TOKEN_LENGTH).map(|_| rng.gen()).collect();
+    let hex_string = hex::encode(random_bytes);
+    format!("{}{}", TOKEN_PREFIX, hex_string)
+}
+
+/// Check if token matches expected format: "TCCMP" + 12 hex characters
+fn is_valid_token_format(token: &str) -> bool {
+    if !token.starts_with(TOKEN_PREFIX) {
+        return false;
+    }
+    let hex_part = &token[TOKEN_PREFIX.len()..];
+    hex_part.len() == TOKEN_LENGTH * 2
+        && hex_part.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Load or create auth token, persisting it to ~/.cc-mapping/provider.json
+pub fn load_or_create_token() -> Result<String> {
+    let home = std::env::var("HOME").context("HOME environment variable not set")?;
+    let auth_dir = PathBuf::from(home).join(".cc-mapping");
+    fs::create_dir_all(&auth_dir).context("Failed to create .cc-mapping directory")?;
+
+    let config_path = auth_dir.join("provider.json");
+
+    // Load existing config or create empty object
+    let mut config: JsonValue = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .context("Failed to read provider.json")?;
+        if content.trim().is_empty() {
+            JsonValue::Object(JsonMap::new())
+        } else {
+            serde_json::from_str(&content)
+                .unwrap_or_else(|_| JsonValue::Object(JsonMap::new()))
+        }
+    } else {
+        JsonValue::Object(JsonMap::new())
+    };
+
+    // Check for existing token in provider.json
+    if let Some(token) = config.get("proxy_token").and_then(|v| v.as_str()) {
+        if is_valid_token_format(token) {
+            // Check if claude settings has this token, if not, update it
+            let _ = ensure_claude_settings_token(token)?;
+            return Ok(token.to_string());
+        }
+    }
+
+    // Generate new token and save to both files
+    let token = generate_token();
+    config["proxy_token"] = JsonValue::String(token.clone());
+
+    fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&config)?,
+    )
+    .context("Failed to write provider.json")?;
+
+    // Also write to claude settings
+    let _ = ensure_claude_settings_token(&token)?;
+
+    tracing::info!("Generated new proxy token and saved to {:?}", config_path);
+    Ok(token)
+}
+
+/// Ensure claude settings has the correct token, update if missing or different format
+fn ensure_claude_settings_token(token: &str) -> Result<()> {
+    let home = std::env::var("HOME").context("HOME environment variable not set")?;
+    let settings_path = PathBuf::from(home).join(".claude").join("settings.json");
+
+    let mut settings = load_json_object(&settings_path, "Claude settings")?;
+    let mut env_map = match settings.remove("env") {
+        Some(JsonValue::Object(map)) => map,
+        _ => JsonMap::new(),
+    };
+
+    let needs_update = match env_map.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str()) {
+        Some(current) => current != token && !is_valid_token_format(current),
+        None => true,
+    };
+
+    if needs_update {
+        env_map.insert(
+            "ANTHROPIC_AUTH_TOKEN".into(),
+            JsonValue::String(token.to_string()),
+        );
+        settings.insert("env".into(), JsonValue::Object(env_map));
+
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&JsonValue::Object(settings))?,
+        )?;
+        tracing::info!("Updated Claude settings with proxy token");
+    }
+
+    Ok(())
+}
+
 /// Configure Claude Code to use the proxy
-pub fn configure_claude(proxy_addr: &str) -> Result<()> {
+pub fn configure_claude(proxy_addr: &str, token: &str) -> Result<()> {
     let home = std::env::var("HOME").context("HOME environment variable not set")?;
     let settings_path = PathBuf::from(home).join(".claude").join("settings.json");
 
@@ -26,15 +129,14 @@ pub fn configure_claude(proxy_addr: &str) -> Result<()> {
         None => JsonMap::new(),
     };
 
-    let new_token = "cc-mapping";
     let new_url = format!("http://{}", proxy_addr);
 
-    backup_if_changed(&mut env_map, "ANTHROPIC_AUTH_TOKEN", new_token);
+    backup_if_changed(&mut env_map, "ANTHROPIC_AUTH_TOKEN", token);
     backup_if_changed(&mut env_map, "ANTHROPIC_BASE_URL", &new_url);
 
     env_map.insert(
         "ANTHROPIC_AUTH_TOKEN".into(),
-        JsonValue::String(new_token.into()),
+        JsonValue::String(token.into()),
     );
     env_map.insert("ANTHROPIC_BASE_URL".into(), JsonValue::String(new_url));
     settings.insert("env".into(), JsonValue::Object(env_map));
@@ -51,7 +153,7 @@ pub fn configure_claude(proxy_addr: &str) -> Result<()> {
 }
 
 /// Configure Codex to use the proxy
-pub fn configure_codex(proxy_addr: &str) -> Result<()> {
+pub fn configure_codex(proxy_addr: &str, token: &str) -> Result<()> {
     let home = std::env::var("HOME").context("HOME environment variable not set")?;
     let codex_dir = PathBuf::from(home).join(".codex");
 
@@ -104,7 +206,7 @@ pub fn configure_codex(proxy_addr: &str) -> Result<()> {
     let mut auth = load_json_object(&auth_path, "Codex auth.json")?;
     auth.insert(
         "OPENAI_API_KEY".into(),
-        JsonValue::String("cc-mapping".into()),
+        JsonValue::String(token.into()),
     );
     fs::write(
         &auth_path,
@@ -117,9 +219,9 @@ pub fn configure_codex(proxy_addr: &str) -> Result<()> {
 }
 
 /// Configure both Claude Code and Codex
-pub fn configure_all(proxy_addr: &str) -> Result<()> {
-    configure_claude(proxy_addr)?;
-    configure_codex(proxy_addr)?;
+pub fn configure_all(proxy_addr: &str, token: &str) -> Result<()> {
+    configure_claude(proxy_addr, token)?;
+    configure_codex(proxy_addr, token)?;
     tracing::info!("✓ All CLI tools configured to use proxy at {}", proxy_addr);
     Ok(())
 }

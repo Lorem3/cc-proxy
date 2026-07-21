@@ -70,9 +70,13 @@ async fn start_daemon(request_log: bool) -> Result<()> {
 
     let advertise_addr = detect_advertise_addr(DEFAULT_BIND_ADDR);
 
+    // Load or create proxy token
+    let auth_token = settings::load_or_create_token()?;
+    println!("🔐 Proxy token: {}", auth_token);
+
     // Configure CLI tools
     println!("⚙️  Configuring CLI tools...");
-    if let Err(e) = settings::configure_all(&advertise_addr) {
+    if let Err(e) = settings::configure_all(&advertise_addr, &auth_token) {
         tracing::warn!("Failed to configure CLI tools: {}", e);
         println!("⚠️  Warning: Failed to configure CLI tools automatically");
         println!("   You may need to configure Claude Code and Codex manually");
@@ -118,7 +122,7 @@ async fn start_daemon(request_log: bool) -> Result<()> {
     println!();
 
     // Run server (blocks until shutdown)
-    server::run_server(router, DEFAULT_BIND_ADDR).await?;
+    server::run_server(router, DEFAULT_BIND_ADDR, auth_token).await?;
 
     // Cleanup on shutdown
     remove_pid_file()?;

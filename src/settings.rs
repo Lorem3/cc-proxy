@@ -184,10 +184,7 @@ pub fn configure_codex(proxy_addr: &str, token: &str) -> Result<()> {
         "base_url".into(),
         toml::Value::String(format!("http://{}", proxy_addr)),
     );
-    cc_provider.insert(
-        "env_key".into(),
-        toml::Value::String("OPENAI_API_KEY".into()),
-    );
+    // env_key is intentionally omitted so Codex reads the API key from auth.json
     cc_provider.insert("wire_api".into(), toml::Value::String("responses".into()));
     cc_provider.insert("requires_openai_auth".into(), toml::Value::Boolean(false));
 

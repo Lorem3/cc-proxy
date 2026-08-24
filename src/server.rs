@@ -134,7 +134,10 @@ async fn handle_request(
         );
         return Err(error_response(
             StatusCode::UNAUTHORIZED,
-            &format!("Invalid or missing authorization token (received: '{}')", received),
+            &format!(
+                "Invalid or missing authorization token (received: '{}')",
+                received
+            ),
         ));
     }
 

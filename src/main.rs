@@ -32,7 +32,8 @@ async fn main() -> Result<()> {
     match args.get(1).map(|s| s.as_str()) {
         Some("start") => {
             let request_log = args.iter().skip(2).any(|a| a == "-log");
-            start_daemon(request_log).await
+            let skip_auth = args.iter().skip(2).any(|a| a == "-no-verify");
+            start_daemon(request_log, skip_auth).await
         }
         Some("stop") => stop_daemon(),
         Some("status") => show_status(),
@@ -50,7 +51,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn start_daemon(request_log: bool) -> Result<()> {
+async fn start_daemon(request_log: bool, skip_auth: bool) -> Result<()> {
     // Check if already running
     if is_running() {
         println!("❌ cc-mapping is already running");
@@ -61,6 +62,9 @@ async fn start_daemon(request_log: bool) -> Result<()> {
     println!("🚀 Starting cc-mapping...");
     if request_log {
         println!("   Request logging enabled (-log)");
+    }
+    if skip_auth {
+        println!("   ⚠️  Auth verification disabled (-no-verify)");
     }
     println!();
 
@@ -122,7 +126,7 @@ async fn start_daemon(request_log: bool) -> Result<()> {
     println!();
 
     // Run server (blocks until shutdown)
-    server::run_server(router, DEFAULT_BIND_ADDR, auth_token).await?;
+    server::run_server(router, DEFAULT_BIND_ADDR, auth_token, skip_auth).await?;
 
     // Cleanup on shutdown
     remove_pid_file()?;
@@ -322,6 +326,7 @@ fn print_help() {
     println!("COMMANDS:");
     println!("    start     Start the proxy daemon");
     println!("              Use -log to print incoming URL, upstream URL, and bodies");
+    println!("              Use -no-verify to disable token verification");
     println!("    stop      Stop the proxy daemon");
     println!("    status    Show proxy status");
     println!("    reload    Reload provider.json configuration");
@@ -347,6 +352,9 @@ fn print_help() {
     println!();
     println!("    # Start with request logging");
     println!("    cc-mapping start -log");
+    println!();
+    println!("    # Start without token verification (for local development)");
+    println!("    cc-mapping start -no-verify");
     println!();
     println!("    # Check if running");
     println!("    cc-mapping status");

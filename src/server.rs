@@ -23,12 +23,14 @@ fn format_incoming_url(headers: &HeaderMap, path_and_query: &str) -> String {
 pub struct AppState {
     pub router: Arc<Router>,
     pub auth_token: Arc<String>,
+    pub skip_auth: bool,
 }
 
-pub fn create_app(router: Arc<Router>, auth_token: String) -> AxumRouter {
+pub fn create_app(router: Arc<Router>, auth_token: String, skip_auth: bool) -> AxumRouter {
     let state = AppState {
         router,
         auth_token: Arc::new(auth_token),
+        skip_auth,
     };
 
     AxumRouter::new()
@@ -117,7 +119,7 @@ async fn handle_request(
     let headers = request.headers().clone();
 
     // Verify authorization
-    if !verify_auth(&headers, &state.auth_token) {
+    if !state.skip_auth && !verify_auth(&headers, &state.auth_token) {
         tracing::warn!(
             "Unauthorized request from {}",
             headers
@@ -165,8 +167,9 @@ pub async fn run_server(
     router: Arc<Router>,
     bind_addr: &str,
     auth_token: String,
+    skip_auth: bool,
 ) -> anyhow::Result<()> {
-    let app = create_app(router, auth_token);
+    let app = create_app(router, auth_token, skip_auth);
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await

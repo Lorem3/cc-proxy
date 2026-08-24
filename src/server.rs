@@ -120,16 +120,21 @@ async fn handle_request(
 
     // Verify authorization
     if !state.skip_auth && !verify_auth(&headers, &state.auth_token) {
+        let received = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("(missing)");
         tracing::warn!(
-            "Unauthorized request from {}",
+            "Unauthorized request from {} with token: {}",
             headers
                 .get("host")
                 .and_then(|v| v.to_str().ok())
-                .unwrap_or("unknown")
+                .unwrap_or("unknown"),
+            received
         );
         return Err(error_response(
             StatusCode::UNAUTHORIZED,
-            "Invalid or missing authorization token",
+            &format!("Invalid or missing authorization token (received: '{}')", received),
         ));
     }
 

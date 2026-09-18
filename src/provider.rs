@@ -414,8 +414,14 @@ mod tests {
         let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
         let resolved = resolve_mapping(cfg);
 
-        assert_eq!(resolved.get("provider_shared").unwrap().api_key, "sk-shared-key");
-        assert_eq!(resolved.get("deepseek-v3").unwrap().api_key, "sk-shared-key");
+        assert_eq!(
+            resolved.get("provider_shared").unwrap().api_key,
+            "sk-shared-key"
+        );
+        assert_eq!(
+            resolved.get("deepseek-v3").unwrap().api_key,
+            "sk-shared-key"
+        );
         assert_eq!(
             resolved.get("deepseek-v3").unwrap().name.as_deref(),
             Some("shared-model")

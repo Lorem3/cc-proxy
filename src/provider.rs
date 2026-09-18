@@ -35,6 +35,8 @@ struct ModelMappingConfig {
     #[serde(default)]
     model_urls: HashMap<String, String>,
     #[serde(default)]
+    model_keys: HashMap<String, String>,
+    #[serde(default)]
     model_mapping: HashMap<String, MappingEntry>,
 }
 
@@ -61,17 +63,9 @@ fn resolve_mapping_alias(
     }
 }
 
-/// Load model-to-provider mappings from the configuration file.
-/// Returns an empty map when the file is absent or the field is not present.
-pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
-    let config_path = get_config_path()?;
-    if !config_path.exists() {
-        return Ok(HashMap::new());
-    }
-    let content = fs::read_to_string(&config_path)
-        .with_context(|| format!("Failed to read config: {:?}", config_path))?;
-    let cfg: ModelMappingConfig = serde_json::from_str(&content).unwrap_or_default();
+fn resolve_mapping(cfg: ModelMappingConfig) -> HashMap<String, PlatformConfig> {
     let model_urls = cfg.model_urls;
+    let model_keys = cfg.model_keys;
     let model_mapping = cfg.model_mapping;
     let mut resolved = HashMap::new();
 
@@ -117,7 +111,43 @@ pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
         }
     }
 
-    Ok(resolved)
+    // Resolve $apiKey references using model_keys
+    resolved.retain(|key, cfg| {
+        let Some(ref_name) = cfg.api_key.strip_prefix('$') else {
+            return true;
+        };
+        if let Some(real_key) = model_keys.get(ref_name) {
+            tracing::debug!(
+                "Resolved apiKey '${}' via model_keys for key '{}'",
+                ref_name,
+                key
+            );
+            cfg.api_key = real_key.clone();
+            true
+        } else {
+            tracing::warn!(
+                "apiKey '${}' for key '{}' not found in model_keys; skipping",
+                ref_name,
+                key
+            );
+            false
+        }
+    });
+
+    resolved
+}
+
+/// Load model-to-provider mappings from the configuration file.
+/// Returns an empty map when the file is absent or the field is not present.
+pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
+    let config_path = get_config_path()?;
+    if !config_path.exists() {
+        return Ok(HashMap::new());
+    }
+    let content = fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read config: {:?}", config_path))?;
+    let cfg: ModelMappingConfig = serde_json::from_str(&content).unwrap_or_default();
+    Ok(resolve_mapping(cfg))
 }
 
 /// Find the best matching model_mapping entry for a request model.
@@ -209,25 +239,12 @@ mod tests {
         "#;
 
         let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
-        let mut resolved = HashMap::new();
-        for (model_key, entry) in &cfg.model_mapping {
-            match entry {
-                MappingEntry::Direct(platform_cfg) => {
-                    resolved.insert(model_key.clone(), platform_cfg.clone());
-                }
-                MappingEntry::Alias(alias_key) => {
-                    if let Some(platform_cfg) =
-                        resolve_mapping_alias(&cfg.model_mapping, alias_key, &mut HashSet::new())
-                    {
-                        resolved.insert(model_key.clone(), platform_cfg);
-                    }
-                }
-            }
-        }
+        let resolved = resolve_mapping(cfg);
 
         let (key, platform_cfg) = find_model_mapping(&resolved, "mimo-v2.5-pro-chat").unwrap();
         assert_eq!(key, "mimo-v2.5");
         assert_eq!(platform_cfg.api_key, "sk-fallback");
+        assert!(!resolved.contains_key("mimo-v2.5-pro"));
     }
 
     #[test]
@@ -309,22 +326,7 @@ mod tests {
         "#;
 
         let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
-        let model_urls = cfg.model_urls;
-        let mut resolved = HashMap::new();
-        for (model_key, entry) in &cfg.model_mapping {
-            if let MappingEntry::Direct(platform_cfg) = entry {
-                resolved.insert(model_key.clone(), platform_cfg.clone());
-            }
-        }
-
-        // Simulate resolution
-        for (key, cfg) in resolved.iter_mut() {
-            if !cfg.api_url.starts_with("http://") && !cfg.api_url.starts_with("https://") {
-                if let Some(resolved_url) = model_urls.get(&cfg.api_url) {
-                    cfg.api_url = resolved_url.clone();
-                }
-            }
-        }
+        let resolved = resolve_mapping(cfg);
 
         assert_eq!(
             resolved.get("mimo_A").unwrap().api_url,
@@ -333,6 +335,90 @@ mod tests {
         assert_eq!(
             resolved.get("mimo_B").unwrap().api_url,
             "https://api.deepseek.com/v1"
+        );
+    }
+
+    #[test]
+    fn model_keys_resolves_dollar_prefixed_api_key() {
+        let json = r#"
+        {
+            "model_keys": {
+                "AAA": "sk-real-key-1",
+                "BBB": "sk-real-key-2"
+            },
+            "model_mapping": {
+                "sonnet": {
+                    "apiUrl": "https://api.anthropic.com",
+                    "apiKey": "$AAA"
+                },
+                "deepseek": {
+                    "apiUrl": "https://api.deepseek.com/v1",
+                    "apiKey": "sk-literal-key"
+                }
+            }
+        }
+        "#;
+
+        let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
+        let resolved = resolve_mapping(cfg);
+
+        assert_eq!(resolved.get("sonnet").unwrap().api_key, "sk-real-key-1");
+        assert_eq!(resolved.get("deepseek").unwrap().api_key, "sk-literal-key");
+    }
+
+    #[test]
+    fn model_keys_skips_missing_reference() {
+        let json = r#"
+        {
+            "model_keys": {
+                "AAA": "sk-real-key-1"
+            },
+            "model_mapping": {
+                "sonnet": {
+                    "apiUrl": "https://api.anthropic.com",
+                    "apiKey": "$MISSING"
+                },
+                "haiku": {
+                    "apiUrl": "https://api.anthropic.com",
+                    "apiKey": "$AAA"
+                }
+            }
+        }
+        "#;
+
+        let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
+        let resolved = resolve_mapping(cfg);
+
+        assert!(!resolved.contains_key("sonnet"));
+        assert_eq!(resolved.get("haiku").unwrap().api_key, "sk-real-key-1");
+    }
+
+    #[test]
+    fn model_keys_resolves_after_alias_expansion() {
+        let json = r#"
+        {
+            "model_keys": {
+                "AAA": "sk-shared-key"
+            },
+            "model_mapping": {
+                "provider_shared": {
+                    "apiUrl": "https://api.shared.com/v1",
+                    "apiKey": "$AAA",
+                    "name": "shared-model"
+                },
+                "deepseek-v3": "provider_shared"
+            }
+        }
+        "#;
+
+        let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
+        let resolved = resolve_mapping(cfg);
+
+        assert_eq!(resolved.get("provider_shared").unwrap().api_key, "sk-shared-key");
+        assert_eq!(resolved.get("deepseek-v3").unwrap().api_key, "sk-shared-key");
+        assert_eq!(
+            resolved.get("deepseek-v3").unwrap().name.as_deref(),
+            Some("shared-model")
         );
     }
 }

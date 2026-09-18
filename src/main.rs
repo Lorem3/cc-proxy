@@ -32,8 +32,8 @@ async fn main() -> Result<()> {
     match args.get(1).map(|s| s.as_str()) {
         Some("start") => {
             let request_log = args.iter().skip(2).any(|a| a == "-log");
-            let skip_auth = args.iter().skip(2).any(|a| a == "-no-verify");
-            start_daemon(request_log, skip_auth).await
+            let verify = args.iter().skip(2).any(|a| a == "-verify");
+            start_daemon(request_log, !verify).await
         }
         Some("stop") => stop_daemon(),
         Some("status") => show_status(),
@@ -64,7 +64,9 @@ async fn start_daemon(request_log: bool, skip_auth: bool) -> Result<()> {
         println!("   Request logging enabled (-log)");
     }
     if skip_auth {
-        println!("   ⚠️  Auth verification disabled (-no-verify)");
+        println!("   ⚠️  Auth verification disabled (default; use -verify to enable)");
+    } else {
+        println!("   🔐 Auth verification enabled (-verify)");
     }
     println!();
 
@@ -326,7 +328,8 @@ fn print_help() {
     println!("COMMANDS:");
     println!("    start     Start the proxy daemon");
     println!("              Use -log to print incoming URL, upstream URL, and bodies");
-    println!("              Use -no-verify to disable token verification");
+    println!("              Token verification is off by default; use -verify to enable it");
+    println!("              -no-verify is accepted for compatibility (same as default)");
     println!("    stop      Stop the proxy daemon");
     println!("    status    Show proxy status");
     println!("    reload    Reload provider.json configuration");
@@ -353,8 +356,8 @@ fn print_help() {
     println!("    # Start with request logging");
     println!("    cc-mapping start -log");
     println!();
-    println!("    # Start without token verification (for local development)");
-    println!("    cc-mapping start -no-verify");
+    println!("    # Start with token verification");
+    println!("    cc-mapping start -verify");
     println!();
     println!("    # Check if running");
     println!("    cc-mapping status");

@@ -13,6 +13,7 @@ Language | 语言: [English](#english) · [中文](#中文)
   * **Model-aware routing**: Route each model to a different upstream via `model_mapping`.
   * **Optional model rename**: Replace the request `model` field before forwarding (e.g. map `deepseek-v3` to `deepseek-v4-pro`).
   * **URL shortcuts**: Define reusable URL aliases in `model_urls` for cleaner configuration.
+  * **API key indexes**: Reuse keys from `model_keys` with `$NAME` in `apiKey` (e.g. `"$AAA"`).
   * **Auto-Configuration**: Automatically manages the proxy settings for Claude Code and Codex CLIs—no manual export needed.
   * **Lightweight**: A single Rust binary with no database or heavy dependencies.
 
@@ -86,10 +87,14 @@ GitHub Actions will automatically build binaries for all five platforms and publ
 ```bash
 # Start the proxy (daemon mode)
 # This automatically configures Claude & Codex to use the proxy.
+# Token verification is off by default.
 cc-mapping start
 
 # Start with request logging (prints incoming URL and upstream URL)
 cc-mapping start -log
+
+# Start with incoming token verification enabled
+cc-mapping start -verify
 
 # Check connection status and current routing
 cc-mapping status
@@ -228,6 +233,31 @@ Use `model_urls` to define reusable URL shortcuts. When `apiUrl` does not start 
 
 In this example, `mimo_A`'s `apiUrl` (`"mimo"`) is resolved to `"https://api.xiaomimimo.com/anthropic"` via `model_urls`, while `mimo_B`'s full URL is kept as-is.
 
+#### Model Keys (API Key Indexes)
+
+Use `model_keys` to define reusable API keys. When `apiKey` starts with `$`, the rest of the string is looked up in `model_keys` and replaced with the matching value. For example, `"$AAA"` reads the `"AAA"` entry.
+
+```json
+{
+  "model_keys": {
+    "AAA": "sk-real-key-1",
+    "BBB": "sk-real-key-2"
+  },
+  "model_mapping": {
+    "sonnet": {
+      "apiUrl": "https://api.anthropic.com",
+      "apiKey": "$AAA"
+    },
+    "deepseek": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-literal-key"
+    }
+  }
+}
+```
+
+In this example, `sonnet`'s `apiKey` (`"$AAA"`) is resolved to `"sk-real-key-1"` via `model_keys`, while `deepseek`'s literal key is kept as-is. If `"$AAA"` is not found in `model_keys`, that mapping entry is skipped.
+
 -----
 
 ## 中文
@@ -241,6 +271,7 @@ In this example, `mimo_A`'s `apiUrl` (`"mimo"`) is resolved to `"https://api.xia
   * **按模型路由**：通过 `model_mapping` 将不同 model 转发到不同上游。
   * **可选 model 替换**：转发前可将请求体中的 `model` 整字段替换为配置的 `name`。
   * **URL 快捷方式**：在 `model_urls` 中定义可复用的 URL 别名，简化配置。
+  * **API Key 索引**：在 `model_keys` 中定义可复用密钥，`apiKey` 写成 `$AAA` 即可引用。
   * **自动配置**：无需手动导出代理变量，自动配置 Claude Code 与 Codex CLI。
   * **轻量单可执行文件**：纯 Rust 实现，无数据库与重依赖。
 
@@ -313,10 +344,14 @@ GitHub Actions 将自动为全部五个平台构建二进制并发布 GitHub Rel
 
 ```bash
 # 启动代理（守护模式），自动配置 Claude & Codex 代理
+# 默认不校验入站 token
 cc-mapping start
 
 # 启动并开启请求日志（打印 incoming URL 和 upstream URL）
 cc-mapping start -log
+
+# 启动并开启入站 token 校验
+cc-mapping start -verify
 
 # 查看连接状态与当前路由
 cc-mapping status
@@ -450,6 +485,31 @@ requires_openai_auth = false
 ```
 
 在此示例中，`mimo_A` 的 `apiUrl`（`"mimo"`）通过 `model_urls` 解析为 `"https://api.xiaomimimo.com/anthropic"`，而 `mimo_B` 的完整 URL 则保持不变。
+
+##### API Key 索引（model_keys）
+
+使用 `model_keys` 定义可复用的 API Key。当 `apiKey` 以 `$` 开头时，会去掉 `$` 后从 `model_keys` 中查找并替换。例如 `"$AAA"` 会读取 `"AAA"` 对应的值。
+
+```json
+{
+  "model_keys": {
+    "AAA": "sk-real-key-1",
+    "BBB": "sk-real-key-2"
+  },
+  "model_mapping": {
+    "sonnet": {
+      "apiUrl": "https://api.anthropic.com",
+      "apiKey": "$AAA"
+    },
+    "deepseek": {
+      "apiUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-literal-key"
+    }
+  }
+}
+```
+
+在此示例中，`sonnet` 的 `apiKey`（`"$AAA"`）通过 `model_keys` 解析为 `"sk-real-key-1"`，而 `deepseek` 的字面量 key 保持不变。若 `"$AAA"` 在 `model_keys` 中不存在，该映射项会被跳过。
 
 -----
 

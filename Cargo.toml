@@ -26,5 +26,5 @@ async-compression = { version = "0.4", features = ["gzip", "tokio"] }
 tokio-util = { version = "0.7", features = ["io"] }
 
 [[bin]]
-name = "cc-mapping"
+name = "ccm"
 path = "src/main.rs"

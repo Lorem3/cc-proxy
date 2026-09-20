@@ -47,6 +47,6 @@ jobs:
 
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: cc-mapping
+          bin: ccm
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}

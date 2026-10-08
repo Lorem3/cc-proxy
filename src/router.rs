@@ -266,9 +266,10 @@ impl Router {
 
             let body_bytes = if has_gzip_encoding {
                 tracing::debug!("Decompressing gzipped error response");
-                let stream = futures::stream::once(async move {
-                    Ok::<_, std::io::Error>(raw_bytes)
-                });
+                let stream = futures::stream::once(futures::future::ready(Ok::<
+                    _,
+                    std::io::Error,
+                >(raw_bytes)));
                 let reader = StreamReader::new(stream);
                 let mut decoder = GzipDecoder::new(reader);
                 let mut out = Vec::new();

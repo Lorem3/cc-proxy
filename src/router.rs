@@ -10,6 +10,7 @@ use futures::TryStreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use tokio_util::io::StreamReader;
 
@@ -188,10 +189,6 @@ impl Router {
 
         let status = response.status();
 
-        if !status.is_success() {
-            anyhow::bail!("Upstream returned error status: {}", status);
-        }
-
         if let Some(tengine_error) = response.headers().get("x-tengine-error") {
             match tengine_error.to_str() {
                 Ok(err) => tracing::warn!(
@@ -258,6 +255,43 @@ impl Router {
                 tracing::debug!("Forwarding header: {}: {:?}", key_str, val);
                 axum_response = axum_response.header(key_str, val);
             }
+        }
+
+        // Pass through upstream errors (status + body) and log them for the console.
+        if !status.is_success() {
+            let raw_bytes = response
+                .bytes()
+                .await
+                .context("Failed to read upstream error body")?;
+
+            let body_bytes = if has_gzip_encoding {
+                tracing::debug!("Decompressing gzipped error response");
+                let stream = futures::stream::once(async move {
+                    Ok::<_, std::io::Error>(raw_bytes)
+                });
+                let reader = StreamReader::new(stream);
+                let mut decoder = GzipDecoder::new(reader);
+                let mut out = Vec::new();
+                decoder
+                    .read_to_end(&mut out)
+                    .await
+                    .context("Failed to decompress upstream error body")?;
+                Bytes::from(out)
+            } else {
+                raw_bytes
+            };
+
+            let body_text = String::from_utf8_lossy(&body_bytes);
+            tracing::error!(
+                upstream_url = %url,
+                status = %status,
+                body = %body_text,
+                "Upstream returned error response"
+            );
+
+            return axum_response
+                .body(Body::from(body_bytes))
+                .context("Failed to build error response");
         }
 
         let stream = response.bytes_stream().map_err(std::io::Error::other);

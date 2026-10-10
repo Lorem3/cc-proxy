@@ -1,4 +1,7 @@
-use crate::provider::{find_model_mapping, load_model_mapping, PlatformConfig};
+use crate::provider::{
+    find_model_mapping, load_model_mapping, promote_wildcard_match, rename_model, MatchKind,
+    PlatformConfig,
+};
 use anyhow::{Context, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use axum::{
@@ -18,6 +21,8 @@ use tokio_util::io::StreamReader;
 pub struct Router {
     http_client: reqwest::Client,
     model_mapping: Arc<RwLock<HashMap<String, PlatformConfig>>>,
+    /// Exact entries created from wildcard hits. Memory only; cleared on reload.
+    learned_exact: Arc<RwLock<HashMap<String, PlatformConfig>>>,
     request_log: bool,
 }
 
@@ -37,6 +42,7 @@ impl Router {
         Ok(Self {
             http_client,
             model_mapping: Arc::new(RwLock::new(mapping)),
+            learned_exact: Arc::new(RwLock::new(HashMap::new())),
             request_log,
         })
     }
@@ -47,8 +53,15 @@ impl Router {
 
         let mapping = load_model_mapping()?;
         let mapping_count = mapping.len();
-        let mut mm = self.model_mapping.write().await;
-        *mm = mapping;
+        {
+            let mut mm = self.model_mapping.write().await;
+            *mm = mapping;
+        }
+        {
+            // Lock order is model_mapping, then learned_exact.
+            let mut learned = self.learned_exact.write().await;
+            learned.clear();
+        }
 
         tracing::info!("✓ Reloaded {} model mapping(s)", mapping_count);
         Ok(())
@@ -74,18 +87,35 @@ impl Router {
 
         tracing::debug!("Request: kind={}, model={}", kind, model);
 
-        let mapping = self.model_mapping.read().await;
-        if mapping.is_empty() {
-            anyhow::bail!("No model_mapping configured");
-        }
-
-        let Some((key, cfg)) = find_model_mapping(&mapping, &model) else {
-            anyhow::bail!("Model '{}' not found in model_mapping", model);
+        let (key, cfg, match_kind) = {
+            let mapping = self.model_mapping.read().await;
+            if mapping.is_empty() {
+                anyhow::bail!("No model_mapping configured");
+            }
+            let learned = self.learned_exact.read().await;
+            let Some((key, cfg, kind)) = find_model_mapping(&mapping, &learned, &model) else {
+                anyhow::bail!("Model '{}' not found in model_mapping", model);
+            };
+            (key, cfg, kind)
         };
-        let cfg = cfg.clone();
-        drop(mapping);
 
-        let forward_body = if let Some(name) = cfg.name.as_ref().filter(|n| !n.is_empty()) {
+        let cfg = if match_kind == MatchKind::Wildcard {
+            let exact = promote_wildcard_match(cfg, &model);
+            let mut learned = self.learned_exact.write().await;
+            if !learned.keys().any(|existing| existing.eq_ignore_ascii_case(&model)) {
+                learned.insert(model.clone(), exact.clone());
+            }
+            tracing::info!(
+                "wildcard model_mapping cached in memory: model={} → pattern={}",
+                model,
+                key
+            );
+            exact
+        } else {
+            cfg
+        };
+
+        let forward_body = if let Some(name) = rename_model(cfg.name.as_deref(), &model) {
             tracing::info!(
                 "model_mapping hit: model={} → key={} url={} name={}",
                 model,
@@ -94,7 +124,7 @@ impl Router {
                 name
             );
             let mut modified = request_json;
-            modified["model"] = Value::String(name.clone());
+            modified["model"] = Value::String(name.to_string());
             Bytes::from(serde_json::to_vec(&modified)?)
         } else {
             tracing::info!(

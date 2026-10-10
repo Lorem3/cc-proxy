@@ -150,19 +150,106 @@ pub fn load_model_mapping() -> Result<HashMap<String, PlatformConfig>> {
     Ok(resolve_mapping(cfg))
 }
 
+/// Which rule produced a model_mapping hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchKind {
+    Learned,
+    Config,
+    Wildcard,
+}
+
 /// Find the best matching model_mapping entry for a request model.
-/// Case-insensitive substring match; longer keys take priority.
+///
+/// Order:
+/// 1. In-memory exact records (case-insensitive full key equality).
+/// 2. Config keys without `*`: case-insensitive substring, longer keys win.
+/// 3. Config keys with `*`: case-insensitive glob. More literal characters win.
 pub fn find_model_mapping(
     mapping: &HashMap<String, PlatformConfig>,
+    learned: &HashMap<String, PlatformConfig>,
     model: &str,
-) -> Option<(String, PlatformConfig)> {
+) -> Option<(String, PlatformConfig, MatchKind)> {
+    if let Some((key, cfg)) = learned
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(model))
+    {
+        return Some((key.clone(), cfg.clone(), MatchKind::Learned));
+    }
+
     let model_lower = model.to_ascii_lowercase();
+
+    if let Some((key, cfg)) = mapping
+        .iter()
+        .filter(|(key, _)| !key.contains('*') && model_lower.contains(&key.to_ascii_lowercase()))
+        .max_by_key(|(key, _)| key.len())
+    {
+        return Some((key.clone(), cfg.clone(), MatchKind::Config));
+    }
 
     mapping
         .iter()
-        .filter(|(key, _)| model_lower.contains(&key.to_ascii_lowercase()))
-        .max_by_key(|(key, _)| key.len())
-        .map(|(key, cfg)| (key.clone(), cfg.clone()))
+        .filter(|(key, _)| key.contains('*') && glob_match(key, model))
+        .max_by_key(|(key, _)| glob_rank(key))
+        .map(|(key, cfg)| (key.clone(), cfg.clone(), MatchKind::Wildcard))
+}
+
+/// Build the in-memory exact entry for a wildcard hit.
+/// A missing or empty `name` becomes the requested model so the next lookup
+/// keeps passing that name through.
+pub fn promote_wildcard_match(mut cfg: PlatformConfig, model: &str) -> PlatformConfig {
+    if cfg.name.as_ref().map(|name| name.is_empty()).unwrap_or(true) {
+        cfg.name = Some(model.to_string());
+    }
+    cfg
+}
+
+/// `Some(name)` when the forwarded body should replace `model`.
+/// Equal names stay on the original body.
+pub fn rename_model<'a>(name: Option<&'a str>, model: &str) -> Option<&'a str> {
+    match name {
+        Some(name) if !name.is_empty() && name != model => Some(name),
+        _ => None,
+    }
+}
+
+fn glob_rank(pattern: &str) -> (usize, std::cmp::Reverse<usize>, usize) {
+    let stars = pattern.bytes().filter(|byte| *byte == b'*').count();
+    let literal = pattern.len().saturating_sub(stars);
+    (literal, std::cmp::Reverse(stars), pattern.len())
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.to_ascii_lowercase();
+    let text = text.to_ascii_lowercase();
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+
+    let mut pattern_index = 0;
+    let mut text_index = 0;
+    let mut star_pattern: Option<usize> = None;
+    let mut star_text = 0;
+
+    while text_index < text.len() {
+        if pattern_index < pattern.len() && pattern[pattern_index] == text[text_index] {
+            pattern_index += 1;
+            text_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_pattern = Some(pattern_index);
+            star_text = text_index;
+            pattern_index += 1;
+        } else if let Some(saved) = star_pattern {
+            pattern_index = saved + 1;
+            star_text += 1;
+            text_index = star_text;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
 }
 
 #[cfg(test)]
@@ -241,7 +328,8 @@ mod tests {
         let cfg: ModelMappingConfig = serde_json::from_str(json).unwrap();
         let resolved = resolve_mapping(cfg);
 
-        let (key, platform_cfg) = find_model_mapping(&resolved, "mimo-v2.5-pro-chat").unwrap();
+        let (key, platform_cfg, _) =
+            find_model_mapping(&resolved, &HashMap::new(), "mimo-v2.5-pro-chat").unwrap();
         assert_eq!(key, "mimo-v2.5");
         assert_eq!(platform_cfg.api_key, "sk-fallback");
         assert!(!resolved.contains_key("mimo-v2.5-pro"));
@@ -259,7 +347,8 @@ mod tests {
             },
         );
 
-        let (_, cfg) = find_model_mapping(&mapping, "claude-sonnet-4-5").unwrap();
+        let (_, cfg, _) =
+            find_model_mapping(&mapping, &HashMap::new(), "claude-sonnet-4-5").unwrap();
         assert_eq!(cfg.api_url, "https://sonnet.api");
     }
 
@@ -291,14 +380,16 @@ mod tests {
             },
         );
 
-        let (key, cfg) = find_model_mapping(&mapping, "mimo-v2.5-pro").unwrap();
+        let (key, cfg, _) = find_model_mapping(&mapping, &HashMap::new(), "mimo-v2.5-pro").unwrap();
         assert_eq!(key, "mimo-v2.5-pro");
         assert_eq!(cfg.api_key, "sk-pro");
 
-        let (key, _) = find_model_mapping(&mapping, "custom-mimo-v2.5-chat").unwrap();
+        let (key, _, _) =
+            find_model_mapping(&mapping, &HashMap::new(), "custom-mimo-v2.5-chat").unwrap();
         assert_eq!(key, "mimo-v2.5");
 
-        let (_, cfg) = find_model_mapping(&mapping, "deepseek-v3-chat").unwrap();
+        let (_, cfg, _) =
+            find_model_mapping(&mapping, &HashMap::new(), "deepseek-v3-chat").unwrap();
         assert_eq!(cfg.api_url, "https://api.deepseek.com/v1");
         assert_eq!(cfg.name.as_deref(), Some("deepseek-v4-pro"));
     }
@@ -426,5 +517,110 @@ mod tests {
             resolved.get("deepseek-v3").unwrap().name.as_deref(),
             Some("shared-model")
         );
+    }
+
+    fn sample_cfg(api_key: &str, name: Option<&str>) -> PlatformConfig {
+        PlatformConfig {
+            api_url: "https://upstream.example/v1".to_string(),
+            api_key: api_key.to_string(),
+            name: name.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn substring_match_beats_wildcard() {
+        let mut mapping = HashMap::new();
+        mapping.insert("gpt".to_string(), sample_cfg("substring-key", None));
+        mapping.insert("gpt-*".to_string(), sample_cfg("wildcard-key", None));
+
+        let (key, cfg, kind) = find_model_mapping(&mapping, &HashMap::new(), "gpt-aaa").unwrap();
+        assert_eq!(key, "gpt");
+        assert_eq!(cfg.api_key, "substring-key");
+        assert_eq!(kind, MatchKind::Config);
+    }
+
+    #[test]
+    fn wildcard_matches_when_no_plain_key_hits() {
+        let mut mapping = HashMap::new();
+        mapping.insert("sonnet".to_string(), sample_cfg("sonnet-key", None));
+        mapping.insert(
+            "gpt-*".to_string(),
+            sample_cfg("wildcard-key", Some("gpt-6.1-sol")),
+        );
+
+        let (key, cfg, kind) = find_model_mapping(&mapping, &HashMap::new(), "gpt-aaa").unwrap();
+        assert_eq!(key, "gpt-*");
+        assert_eq!(kind, MatchKind::Wildcard);
+        assert_eq!(cfg.api_key, "wildcard-key");
+        assert_eq!(cfg.name.as_deref(), Some("gpt-6.1-sol"));
+
+        assert!(find_model_mapping(&mapping, &HashMap::new(), "claude-opus").is_none());
+        assert!(super::glob_match("gpt-*", "GPT-AAA"));
+        assert!(!super::glob_match("gpt-*", "xg-gpt-aaa"));
+        assert!(super::glob_match("*-codex", "gpt-5-codex"));
+        assert!(super::glob_match("gpt-*-mini", "gpt-5-mini"));
+        assert!(!super::glob_match("gpt-*-mini", "gpt-mini"));
+    }
+
+    #[test]
+    fn wildcard_prefers_more_specific_pattern() {
+        let mut mapping = HashMap::new();
+        mapping.insert("gpt-*".to_string(), sample_cfg("broad", None));
+        mapping.insert("gpt-5-*".to_string(), sample_cfg("specific", None));
+        mapping.insert("*".to_string(), sample_cfg("any", None));
+
+        let (key, cfg, kind) =
+            find_model_mapping(&mapping, &HashMap::new(), "gpt-5-codex").unwrap();
+        assert_eq!(key, "gpt-5-*");
+        assert_eq!(kind, MatchKind::Wildcard);
+        assert_eq!(cfg.api_key, "specific");
+
+        let (key, cfg, _) = find_model_mapping(&mapping, &HashMap::new(), "gpt-aaa").unwrap();
+        assert_eq!(key, "gpt-*");
+        assert_eq!(cfg.api_key, "broad");
+    }
+
+    #[test]
+    fn promote_wildcard_uses_request_model_when_name_missing() {
+        let promoted = promote_wildcard_match(sample_cfg("sk", None), "gpt-aaa");
+        assert_eq!(promoted.name.as_deref(), Some("gpt-aaa"));
+        assert_eq!(promoted.api_key, "sk");
+        assert!(rename_model(promoted.name.as_deref(), "gpt-aaa").is_none());
+
+        let empty = promote_wildcard_match(sample_cfg("sk", Some("")), "gpt-aaa");
+        assert_eq!(empty.name.as_deref(), Some("gpt-aaa"));
+    }
+
+    #[test]
+    fn promote_wildcard_keeps_configured_name() {
+        let promoted = promote_wildcard_match(sample_cfg("sk", Some("gpt-6.1-sol")), "gpt-aaa");
+        assert_eq!(promoted.name.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(
+            rename_model(promoted.name.as_deref(), "gpt-aaa"),
+            Some("gpt-6.1-sol")
+        );
+    }
+
+    #[test]
+    fn learned_exact_match_beats_wildcard_and_does_not_substring() {
+        let mut mapping = HashMap::new();
+        mapping.insert("gpt-*".to_string(), sample_cfg("wildcard-key", None));
+
+        let mut learned = HashMap::new();
+        learned.insert(
+            "gpt-aaa".to_string(),
+            promote_wildcard_match(sample_cfg("cached-key", None), "gpt-aaa"),
+        );
+
+        let (key, cfg, kind) = find_model_mapping(&mapping, &learned, "GPT-AAA").unwrap();
+        assert_eq!(key, "gpt-aaa");
+        assert_eq!(kind, MatchKind::Learned);
+        assert_eq!(cfg.api_key, "cached-key");
+        assert_eq!(cfg.name.as_deref(), Some("gpt-aaa"));
+
+        let (key, cfg, kind) = find_model_mapping(&mapping, &learned, "gpt-aaa-extra").unwrap();
+        assert_eq!(key, "gpt-*");
+        assert_eq!(kind, MatchKind::Wildcard);
+        assert_eq!(cfg.api_key, "wildcard-key");
     }
 }

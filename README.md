@@ -202,6 +202,8 @@ Optionally set `name` to replace the entire `model` field in the request body be
 
 - Match is case-insensitive substring: `"sonnet"` matches `claude-sonnet-4-5`, `claude-sonnet-3-7`, etc.
 - More specific (longer) keys win: `"mimo-v2.5-pro"` matches before `"mimo-v2.5"`.
+- Keys that contain `*` are globs, used only when no plain key matches. `gpt-*` matches `gpt-aaa`. Among several globs, the one with more literal characters wins.
+- A glob hit is remembered in memory as an exact entry for that model. It is not written to `provider.json`, and it is dropped on restart or config reload. If the glob entry has no `name`, the remembered `name` is the requested model and the request body is left unchanged.
 - If `name` is set, the request body's `model` field is replaced entirely before forwarding.
 - If an alias value (e.g. `"provider_deepseek"`) is missing in `model_mapping`, that mapping entry is skipped (fallback behavior).
 - If no key matches the model, the request fails with an error.
@@ -455,6 +457,8 @@ requires_openai_auth = false
 
 - 大小写不敏感子串匹配：`"sonnet"` 可命中 `claude-sonnet-4-5`、`claude-sonnet-3-7` 等。
 - 更长的 key 优先：`"mimo-v2.5-pro"` 早于 `"mimo-v2.5"` 匹配。
+- 含 `*` 的 key 是通配，只在普通 key 都未命中时使用。`gpt-*` 可命中 `gpt-aaa`。多条通配同时命中时，字面量更长的优先。
+- 通配命中后会在内存中记下该模型的精确记录，不写入 `provider.json`。重启或 reload 后丢弃，下次请求再生成。通配条目没有 `name` 时，这条记录的 `name` 为请求里的原始模型名，请求体保持不变。
 - 配置了 `name` 时，转发前将请求体 `model` 整字段替换为 `name`。
 - 若 value 为别名（如 `"provider_deepseek"`）但 `model_mapping` 中不存在该 key，则该映射项会被跳过（回退行为）。
 - 若无匹配 key，请求返回错误。

@@ -90,7 +90,10 @@ async fn start_daemon(request_log: bool, skip_auth: bool) -> Result<()> {
     println!();
 
     // Keep upstream responses compressed so headers stay consistent end-to-end.
+    // Ignore HTTP(S)_PROXY: Clash tunnel mode injects a system proxy, and
+    // sending upstream requests back through it makes those requests fail.
     let http_client = reqwest::Client::builder()
+        .no_proxy()
         .no_gzip()
         .no_deflate()
         .no_brotli()
